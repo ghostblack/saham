@@ -42,6 +42,7 @@ import {
   History
 } from 'lucide-react';
 import Sparkline from '@/components/Sparkline';
+import { IDX_TICKERS } from '@/lib/tickers';
 
 interface StockResult {
   ticker: string;
@@ -67,7 +68,9 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [cached, setCached] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-
+  const [sortBy, setSortBy] = useState<'volume' | 'distance' | 'tightness' | 'ticker'>('distance');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [searchQuery, setSearchQuery] = useState('');
   // Watchlist State
   const [activeTab, setActiveTab] = useState<'screener' | 'watchlist' | 'analysis' | 'history'>('screener');
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -213,44 +216,59 @@ export default function Home() {
   const performScreening = async (force = false) => {
     setLoading(true);
     setError(null);
-    setProgress({ current: 0, total: 941 });
+    const total = IDX_TICKERS.length;
+    setProgress({ current: 0, total });
+
     try {
-      const response = await fetch(`/api/screen${force ? '?refresh=true' : ''}`);
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader');
-
-      const decoder = new TextEncoder();
-      let buffer = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += new TextDecoder().decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.substring(6));
-            if (data.type === 'progress') {
-              setProgress({ current: data.current, total: data.total });
-            } else if (data.type === 'results') {
-              setResults(data.data);
-              setCached(data.cached);
-            }
-          } catch (e) {
-            console.error('Error parsing stream chunk:', e);
-          }
+      if (!force) {
+        // First, check for cache
+        const cacheRes = await fetch('/api/screen');
+        const cacheData = await cacheRes.json();
+        if (cacheData.cached && cacheData.results.length > 0) {
+          setResults(cacheData.results);
+          setCached(true);
+          setLoading(false);
+          setProgress(null);
+          return;
         }
       }
+
+      setCached(false);
+      setResults([]);
+      const allResults: StockResult[] = [];
+      const batchSize = 5;
+
+      for (let i = 0; i < total; i += batchSize) {
+        const batch = IDX_TICKERS.slice(i, i + batchSize);
+        setProgress({ current: i, total });
+
+        const response = await fetch('/api/screen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tickers: batch, forceRefresh: force })
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch batch');
+
+        const data = await response.json();
+        if (data.results) {
+          allResults.push(...data.results);
+          setResults([...allResults]); // Update UI incrementally
+        }
+
+        // Delay between batches to avoid rate limits
+        if (i + batchSize < total) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+
+      setProgress({ current: total, total });
     } catch (err) {
-      setError('An error occurred while screening');
+      setError('An error occurred during screening');
       console.error(err);
     } finally {
       setLoading(false);
-      setProgress(null);
+      setTimeout(() => setProgress(null), 2000);
     }
   };
 
@@ -312,6 +330,29 @@ export default function Home() {
     performScreening(false); // Initial load can use cache
   }, []);
 
+  const sortedResults = [...results]
+    .filter(r => r.ticker.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      let valA, valB;
+      if (sortBy === 'volume') {
+        valA = a.volumeRatio;
+        valB = b.volumeRatio;
+      } else if (sortBy === 'distance') {
+        valA = a.distance;
+        valB = b.distance;
+      } else if (sortBy === 'tightness') {
+        valA = a.tightness;
+        valB = b.tightness;
+      } else {
+        valA = a.ticker;
+        valB = b.ticker;
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
   const spikeCount = results.filter(r => r.isVolumeSpike).length;
   const tightCount = results.filter(r => r.tightness < 0.05).length;
 
@@ -371,7 +412,12 @@ export default function Home() {
         <header className="top-bar">
           <div className="search-bar">
             <Search size={18} color="var(--text-dim)" />
-            <input type="text" placeholder="Search stock or strategy... (⌘ + F)" />
+            <input
+              type="text"
+              placeholder="Search ticker... (⌘ + F)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', color: 'var(--text-muted)' }}>
             <Bell size={18} />
@@ -432,7 +478,26 @@ export default function Home() {
               <div className="data-card">
                 <div className="card-header">
                   <h3 className="card-title">List of Screened Stocks</h3>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'var(--bg-app)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
+                      <Filter size={14} color="var(--text-dim)" />
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as any)}
+                        style={{ border: 'none', background: 'transparent', fontSize: '0.75rem', fontWeight: 600, outline: 'none', cursor: 'pointer' }}
+                      >
+                        <option value="distance">Sort by Distance</option>
+                        <option value="volume">Sort by Volume</option>
+                        <option value="tightness">Sort by Tightness</option>
+                        <option value="ticker">Sort by Ticker</option>
+                      </select>
+                      <button
+                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--primary)' }}
+                      >
+                        {sortOrder === 'asc' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                      </button>
+                    </div>
                     {cached && <div className="badge badge-indigo">Cached Data (1h)</div>}
                   </div>
                 </div>
@@ -471,8 +536,8 @@ export default function Home() {
                             <td><div className="skeleton" style={{ width: '80px', height: '30px' }} /></td>
                           </tr>
                         ))
-                      ) : results.length > 0 ? (
-                        results.map((stock) => (
+                      ) : sortedResults.length > 0 ? (
+                        sortedResults.map((stock) => (
                           <tr key={stock.ticker}>
                             <td>
                               <div className="ticker-cell">
