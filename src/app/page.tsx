@@ -66,6 +66,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cached, setCached] = useState(false);
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Watchlist State
   const [activeTab, setActiveTab] = useState<'screener' | 'watchlist' | 'analysis' | 'history'>('screener');
@@ -159,7 +160,7 @@ export default function Home() {
       entry = stock.price + getTickSize(stock.price);
       strategy = 'HAKA';
     } else {
-      // Find nearest MA below price (MA 5, 20, 50, 100, 200)
+      // Find nearest MA below price (MA 3, 5, 20, 50, 100, 200)
       const mas = Object.values(stock.smaValues).filter(v => v <= stock.price);
       if (mas.length > 0) {
         entry = Math.max(...mas);
@@ -212,19 +213,44 @@ export default function Home() {
   const performScreening = async (force = false) => {
     setLoading(true);
     setError(null);
+    setProgress({ current: 0, total: 941 });
     try {
       const response = await fetch(`/api/screen${force ? '?refresh=true' : ''}`);
-      const data = await response.json();
-      if (data.results) {
-        setResults(data.results);
-        setCached(data.cached);
-      } else {
-        setError('Failed to fetch results');
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No reader');
+
+      const decoder = new TextEncoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += new TextDecoder().decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.substring(6));
+            if (data.type === 'progress') {
+              setProgress({ current: data.current, total: data.total });
+            } else if (data.type === 'results') {
+              setResults(data.data);
+              setCached(data.cached);
+            }
+          } catch (e) {
+            console.error('Error parsing stream chunk:', e);
+          }
+        }
       }
     } catch (err) {
       setError('An error occurred while screening');
+      console.error(err);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -368,10 +394,21 @@ export default function Home() {
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Market Screening: Price &gt; SMAs + 0-3% Distance</p>
                 </div>
                 <button className="btn-primary" onClick={() => performScreening(true)} disabled={loading}>
-                  {loading ? <span className="loading-dots">Screening</span> : <>
-                    <RefreshCw size={14} />
-                    <span>Refresh Screen</span>
-                  </>}
+                  {loading ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="loading-dots">Screening</span>
+                      {progress && (
+                        <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+                          {progress.current} / {progress.total}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <RefreshCw size={14} />
+                      <span>Refresh Screen</span>
+                    </>
+                  )}
                 </button>
               </div>
 
