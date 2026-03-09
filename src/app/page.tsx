@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
+import { initializeApp } from 'firebase/app';
+import { signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
 import {
   doc,
   setDoc,
@@ -36,10 +38,11 @@ import {
   LineChart,
   ChevronRight,
   Calculator,
-  Wallet,
   Target,
   AlertTriangle,
-  History
+  History,
+  Users,
+  Wallet
 } from 'lucide-react';
 import Sparkline from '@/components/Sparkline';
 import { IDX_TICKERS } from '@/lib/tickers';
@@ -62,7 +65,176 @@ interface WatchlistItem {
   entryDate: string;
 }
 
+interface AdminUser {
+  id: string;
+  password?: string;
+  limitType?: 'subscription' | 'quota';
+  validUntil?: string;
+  quota?: number;
+  count?: number; // optionally track their daily count
+}
+
+function AdminUserRow({ u, onDelete }: { u: AdminUser, onDelete: (username: string) => void }) {
+  const [usage, setUsage] = useState<number>(0);
+
+  useEffect(() => {
+    if (u.id === 'admin') return;
+    const isSub = (!u.limitType || u.limitType === 'subscription');
+    const usageDocRef = doc(db, `users/${u.id}/usage/${isSub ? 'daily' : 'total'}`);
+    const unsub = onSnapshot(usageDocRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (isSub) {
+          const today = new Date().toISOString().split('T')[0];
+          setUsage(data.date === today ? (data.count || 0) : 0);
+        } else {
+          setUsage(data.count || 0);
+        }
+      }
+    });
+    return () => unsub();
+  }, [u]);
+
+  const limitType = u.limitType || 'subscription';
+  const isExpired = limitType === 'subscription' && new Date(u.validUntil || '') < new Date();
+
+  let daysLeftText = '';
+  if (limitType === 'subscription' && u.validUntil) {
+    const diffTime = new Date(u.validUntil).getTime() - new Date().getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    daysLeftText = diffDays > 0 ? `${diffDays} days left` : 'Expired';
+  }
+
+  return (
+    <tr key={u.id}>
+      <td>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+            {u.id.substring(0, 2)}
+          </div>
+          <div style={{ fontWeight: 700 }}>{u.id}</div>
+        </div>
+      </td>
+      <td style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>
+        {u.id === 'admin' ? '********' : u.password}
+      </td>
+      <td>{limitType === 'quota' ? 'Fixed Quota' : 'Time-based'}</td>
+      <td>
+        {u.id === 'admin' ? (
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Unlimited</span>
+        ) : limitType === 'quota' ? (
+          <div style={{ fontSize: '0.75rem' }}>
+            Used: <strong>{usage}</strong> / {u.quota || 0}
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.75rem' }}>
+            <span style={{ fontWeight: 600 }}>{daysLeftText}</span> <br />
+            <span style={{ color: 'var(--text-muted)' }}>(Today: {usage}/3 screened)</span>
+          </div>
+        )}
+      </td>
+      <td>
+        {u.id === 'admin' ? (
+          <span className="badge badge-indigo">System Admin</span>
+        ) : limitType === 'quota' ? (
+          <span className="badge badge-cyan">Quota Mode</span>
+        ) : isExpired ? (
+          <span className="badge badge-rose">Expired</span>
+        ) : (
+          <span className="badge badge-cyan">Active</span>
+        )}
+      </td>
+      <td>
+        {u.id !== 'admin' && (
+          <button
+            onClick={() => onDelete(u.id)}
+            style={{ border: 'none', background: 'transparent', color: 'var(--rose)', cursor: 'pointer', padding: '0.25rem' }}
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export default function Home() {
+  // Auth State
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string>('');
+  const [currentUserLimitType, setCurrentUserLimitType] = useState<'subscription' | 'quota' | null>(null);
+  const [currentUserUsage, setCurrentUserUsage] = useState<number>(0);
+  const [currentUserQuota, setCurrentUserQuota] = useState<number>(0);
+  const [currentUserValidUntil, setCurrentUserValidUntil] = useState<string>('');
+
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [authInitialized, setAuthInitialized] = useState(false);
+
+  // Toast & Modal UI State
+  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; submessage?: string; onConfirm: () => void } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user && user.email) {
+        // user.email will be `{username}@nexus.stock`
+        const username = user.email.split('@')[0];
+        setCurrentUser(username);
+        setIsLoggedIn(true);
+      } else {
+        setCurrentUser('');
+        setIsLoggedIn(false);
+      }
+      setAuthInitialized(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+
+    try {
+      let email = loginUsername.trim();
+      // If user typed a raw username, append our custom domain.
+      // If they typed an email (like admin@gmail.com), use it directly.
+      if (!email.includes('@')) {
+        email = `${email}@nexus.stock`;
+      }
+
+      await signInWithEmailAndPassword(auth, email, loginPassword);
+      setLoginError('');
+    } catch (err: any) {
+      if (err.code === 'auth/invalid-credential') {
+        setLoginError('Invalid username or password.');
+      } else {
+        setLoginError(`Login Failed: ${err.message || err.code}`);
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setResults([]);
+      setWatchlist([]);
+      setHistory([]);
+    } catch (err) {
+      console.error('Failed to logout', err);
+    }
+  };
+
   const [results, setResults] = useState<StockResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,11 +244,18 @@ export default function Home() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [searchQuery, setSearchQuery] = useState('');
   // Watchlist State
-  const [activeTab, setActiveTab] = useState<'screener' | 'watchlist' | 'analysis' | 'history'>('screener');
+  const [activeTab, setActiveTab] = useState<'screener' | 'watchlist' | 'analysis' | 'history' | 'admin'>('screener');
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [watchlistData, setWatchlistData] = useState<any[]>([]);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
+
+  // Admin State
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newLimitType, setNewLimitType] = useState<'subscription' | 'quota'>('subscription');
+  const [newLimitValue, setNewLimitValue] = useState(30);
 
   // Trade Analysis State
   const [capital, setCapital] = useState<number>(10000000); // 10jt
@@ -105,8 +284,10 @@ export default function Home() {
 
   // Firestore Sync: Settings & Watchlist
   useEffect(() => {
+    if (!isLoggedIn || !currentUser) return;
+
     // Sync Settings (Capital, Risk)
-    const settingsDoc = doc(db, 'users/default/settings/user_settings');
+    const settingsDoc = doc(db, `users/${currentUser}/settings/user_settings`);
     const unsubscribeSettings = onSnapshot(settingsDoc, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -116,37 +297,98 @@ export default function Home() {
     });
 
     // Sync Watchlist
-    const watchlistCol = collection(db, 'users/default/watchlist');
+    const watchlistCol = collection(db, `users/${currentUser}/watchlist`);
     const unsubscribeWatchlist = onSnapshot(watchlistCol, (snapshot) => {
       const items = snapshot.docs.map(doc => doc.data() as WatchlistItem);
       setWatchlist(items);
     });
 
     // Sync History
-    const historyCol = collection(db, 'users/default/history');
+    const historyCol = collection(db, `users/${currentUser}/history`);
     const historyQuery = query(historyCol, orderBy('timestamp', 'desc'));
     const unsubscribeHistory = onSnapshot(historyQuery, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setHistory(items);
     });
 
+    // Sync Admin Users if currentUser is admin
+    let unsubscribeAdmin = () => { };
+    if (currentUser === 'admin') {
+      const usersDoc = doc(db, 'system/users');
+      unsubscribeAdmin = onSnapshot(usersDoc, (snapshot) => {
+        if (snapshot.exists()) {
+          const accounts = snapshot.data().accounts || {};
+          const mappedUsers = Object.keys(accounts).map(key => ({
+            id: key,
+            ...accounts[key]
+          }));
+          setAdminUsers(mappedUsers);
+        }
+      });
+    }
+
+    // Sync Current User Data (to check if they have a subscription)
+    let unsubscribeCurrentUser = () => { };
+    if (currentUser && currentUser !== 'admin') {
+      const myDoc = doc(db, 'system/users');
+      unsubscribeCurrentUser = onSnapshot(myDoc, (snapshot) => {
+        if (snapshot.exists()) {
+          const accounts = snapshot.data().accounts || {};
+          const me = accounts[currentUser];
+          if (me) {
+            setCurrentUserLimitType(me.limitType || 'subscription');
+            setCurrentUserQuota(me.quota || 0);
+            setCurrentUserValidUntil(me.validUntil || '');
+          }
+        }
+      });
+    } else {
+      setCurrentUserLimitType(null); // admin or logged out
+      setCurrentUserUsage(0);
+    }
+
     return () => {
       unsubscribeSettings();
       unsubscribeWatchlist();
       unsubscribeHistory();
+      unsubscribeAdmin();
+      unsubscribeCurrentUser();
     };
-  }, []);
+  }, [isLoggedIn, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser === 'admin' || !currentUserLimitType) return;
+
+    const isSub = currentUserLimitType === 'subscription';
+    const usageDocRef = doc(db, `users/${currentUser}/usage/${isSub ? 'daily' : 'total'}`);
+
+    const unsubUsage = onSnapshot(usageDocRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (isSub) {
+          const today = new Date().toISOString().split('T')[0];
+          setCurrentUserUsage(data.date === today ? (data.count || 0) : 0);
+        } else {
+          setCurrentUserUsage(data.count || 0);
+        }
+      } else {
+        setCurrentUserUsage(0);
+      }
+    });
+    return () => unsubUsage();
+  }, [currentUser, currentUserLimitType]);
 
   // Save Settings to Firestore when changed
   useEffect(() => {
+    if (!isLoggedIn || !currentUser) return;
     const saveSettings = async () => {
-      await setDoc(doc(db, 'users/default/settings/user_settings'), {
+      await setDoc(doc(db, `users/${currentUser}/settings/user_settings`), {
         capital,
         riskPercent
       }, { merge: true });
     };
     saveSettings();
-  }, [capital, riskPercent]);
+  }, [capital, riskPercent, isLoggedIn, currentUser]);
 
   // Fetch quotes when watchlist changes or tab switches
   useEffect(() => {
@@ -214,6 +456,72 @@ export default function Home() {
   };
 
   const performScreening = async (force = false) => {
+    if (!isLoggedIn || !currentUser) return;
+
+    if (currentUser !== 'admin') {
+      try {
+        const usersRef = doc(db, 'system/users');
+        const userSnap = await getDoc(usersRef);
+        let me: any = null;
+        if (userSnap.exists()) {
+          const accounts = userSnap.data().accounts;
+          me = accounts[currentUser];
+        }
+
+        if (!me) {
+          showToast('User account not found or has been disabled.', 'error');
+          return;
+        }
+
+        const limitType = me.limitType || 'subscription';
+
+        if (limitType === 'subscription') {
+          if (new Date(me.validUntil) < new Date()) {
+            showToast('Trial/Subscription has expired. Please contact admin for monthly subscription payment.', 'error');
+            return;
+          }
+
+          const today = new Date().toISOString().split('T')[0];
+          const usageRef = doc(db, `users/${currentUser}/usage/daily`);
+          const usageSnap = await getDoc(usageRef);
+
+          let currentUses = 0;
+          if (usageSnap.exists()) {
+            const data = usageSnap.data();
+            if (data.date === today) {
+              currentUses = data.count || 0;
+            }
+          }
+
+          if (currentUses >= 3) {
+            showToast('Daily limit reached! You can only screen 3 times per day.', 'error');
+            return;
+          }
+
+          await setDoc(usageRef, { date: today, count: currentUses + 1 });
+        } else if (limitType === 'quota') {
+          const usageRef = doc(db, `users/${currentUser}/usage/total`);
+          const usageSnap = await getDoc(usageRef);
+
+          let currentUses = 0;
+          if (usageSnap.exists()) {
+            currentUses = usageSnap.data().count || 0;
+          }
+
+          const maxQuota = me.quota || 0;
+          if (currentUses >= maxQuota) {
+            showToast(`Total screening quota (${maxQuota}) reached! Please contact admin to add more screenings.`, 'error');
+            return;
+          }
+
+          await setDoc(usageRef, { count: currentUses + 1 });
+        }
+      } catch (err) {
+        showToast('Failed to verify subscription status', 'error');
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     const total = IDX_TICKERS.length;
@@ -288,7 +596,7 @@ export default function Home() {
   };
 
   const addToWatchlist = async (stock: StockResult) => {
-    const tickerRef = doc(db, `users/default/watchlist/${stock.ticker}`);
+    const tickerRef = doc(db, `users/${currentUser}/watchlist/${stock.ticker}`);
     const snapshot = await getDoc(tickerRef);
     if (snapshot.exists()) return;
 
@@ -298,11 +606,11 @@ export default function Home() {
       entryDate: new Date().toISOString().split('T')[0]
     };
     await setDoc(tickerRef, newItem);
-    alert(`${stock.ticker} added to watchlist at ${stock.price}`);
+    showToast(`${stock.ticker} added to watchlist at ${stock.price}`, 'success');
   };
 
   const removeFromWatchlist = async (ticker: string) => {
-    await deleteDoc(doc(db, `users/default/watchlist/${ticker}`));
+    await deleteDoc(doc(db, `users/${currentUser}/watchlist/${ticker}`));
   };
 
   const executeTrade = async () => {
@@ -310,7 +618,7 @@ export default function Home() {
 
     try {
       // 1. Save to History
-      await addDoc(collection(db, 'users/default/history'), {
+      await addDoc(collection(db, `users/${currentUser}/history`), {
         ...tradePlan,
         timestamp: new Date().toISOString(),
         type: 'BUY'
@@ -319,16 +627,100 @@ export default function Home() {
       // 2. Add to Watchlist if not already there
       await addToWatchlist(selectedStockForAnalysis);
 
-      alert('Trade executed and recorded in History!');
+      showToast('Trade executed and recorded in History!', 'success');
       setActiveTab('watchlist');
     } catch (err) {
-      alert('Failed to execute trade');
+      showToast('Failed to execute trade', 'error');
+    }
+  };
+
+  // Admin Actions
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername || !newPassword) return;
+
+    try {
+      // 1. Create a secondary Firebase App specifically to register the new user without logging out Admin
+      const secondaryApp = initializeApp(auth.app.options, 'SecondaryApp');
+      const secondaryAuth = getAuth(secondaryApp);
+
+      const email = `${newUsername}@nexus.stock`;
+      await createUserWithEmailAndPassword(secondaryAuth, email, newPassword);
+      // Secondary auth is done, we can sign it out to clean up
+      await signOut(secondaryAuth);
+
+      // 2. Set limits and quota parameters on root App's Firestore
+      const usersRef = doc(db, 'system/users');
+      const docSnap = await getDoc(usersRef);
+      let accounts: Record<string, Omit<AdminUser, 'id'>> = {};
+      if (docSnap.exists()) accounts = docSnap.data().accounts || {};
+
+      let validUntil = '';
+      let quota = 0;
+
+      if (newLimitType === 'subscription') {
+        const validUntilDate = new Date();
+        validUntilDate.setDate(validUntilDate.getDate() + newLimitValue);
+        validUntil = validUntilDate.toISOString().split('T')[0];
+      } else {
+        quota = newLimitValue;
+      }
+
+      accounts[newUsername] = {
+        password: newPassword,
+        limitType: newLimitType,
+        validUntil,
+        quota
+      };
+
+      await setDoc(usersRef, { accounts }, { merge: true });
+      setNewUsername('');
+      setNewPassword('');
+      showToast(`Firebase User ${newUsername} added successfully!`, 'success');
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        showToast('This username is already taken in Firebase Auth.', 'error');
+      } else {
+        showToast('Failed to add user: ' + err.message, 'error');
+      }
+    }
+  };
+
+  const handleDeleteUser = async (username: string, force = false) => {
+    if (username === 'admin') return showToast('Cannot delete admin', 'error');
+
+    if (!force) {
+      setConfirmModal({
+        isOpen: true,
+        title: `Delete User ${username}?`,
+        message: `Are you sure you want to permanently delete user ${username}?`,
+        submessage: `Note: The user's Firestore limits will be deleted, but you must manually delete the Firebase Auth account in the Firebase Console if you wish to wipe them entirely.`,
+        onConfirm: () => {
+          setConfirmModal(null);
+          handleDeleteUser(username, true);
+        }
+      });
+      return;
+    }
+
+    try {
+      const usersRef = doc(db, 'system/users');
+      const docSnap = await getDoc(usersRef);
+      if (docSnap.exists()) {
+        const accounts = docSnap.data().accounts;
+        delete accounts[username];
+        await setDoc(usersRef, { accounts });
+        showToast(`User ${username} deleted successfully`, 'success');
+      }
+    } catch (err) {
+      showToast('Failed to delete user data', 'error');
     }
   };
 
   useEffect(() => {
-    performScreening(false); // Initial load can use cache
-  }, []);
+    // We no longer perform screening automatically on login
+    // User must click the "Refresh Screen" button manually
+  }, [isLoggedIn]);
 
   const sortedResults = [...results]
     .filter(r => r.ticker.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -356,13 +748,61 @@ export default function Home() {
   const spikeCount = results.filter(r => r.isVolumeSpike).length;
   const tightCount = results.filter(r => r.tightness < 0.05).length;
 
+  if (!authInitialized) {
+    return <div className="app-layout" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="loading-dots">Loading App</div>
+    </div>;
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="app-layout" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-body)' }}>
+        <div className="data-card" style={{ padding: '2rem', width: '100%', maxWidth: '400px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2.5rem' }}>
+            <Activity size={28} color="var(--primary)" />
+            <span style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.5px' }}>Mantra</span>
+          </div>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', textAlign: 'center' }}>Login to Access</h2>
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Username</label>
+              <input
+                type="text"
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-main)' }}
+                placeholder="Enter username"
+                required
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Password</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-main)' }}
+                placeholder="Enter password"
+                required
+              />
+            </div>
+            {loginError && <div style={{ color: 'var(--rose)', fontSize: '0.75rem', textAlign: 'center' }}>{loginError}</div>}
+            <button type="submit" className="btn-primary" style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', justifyContent: 'center' }}>
+              Login
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-layout">
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="logo">
           <Zap size={28} fill="currentColor" />
-          <span>Nexus Stock</span>
+          <span>Mantra</span>
         </div>
 
         <nav className="nav-section">
@@ -404,6 +844,20 @@ export default function Home() {
             <span>Market Data</span>
           </a>
         </nav>
+
+        {currentUser === 'admin' && (
+          <nav className="nav-section" style={{ marginTop: '2rem' }}>
+            <div className="nav-label">Administration</div>
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`nav-item ${activeTab === 'admin' ? 'active' : ''}`}
+              style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <Users size={20} />
+              <span>User Panel</span>
+            </button>
+          </nav>
+        )}
         {/* ... rest of sidebar ... */}
       </aside>
 
@@ -423,11 +877,27 @@ export default function Home() {
             <Bell size={18} />
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)' }}>Adhik Naenggar</div>
-                <div style={{ fontSize: '0.65rem' }}>Trader Pro</div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)' }}>{currentUser}</div>
+                <div style={{ fontSize: '0.65rem', textTransform: 'capitalize' }}>
+                  {currentUser === 'admin' ? 'Administrator' :
+                    currentUserLimitType === 'subscription' ? (
+                      <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                        {Math.max(0, 3 - currentUserUsage)} Daily left
+                      </span>
+                    ) : currentUserLimitType === 'quota' ? (
+                      <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                        {Math.max(0, currentUserQuota - currentUserUsage)} Quota left
+                      </span>
+                    ) : 'Trader'
+                  }
+                </div>
               </div>
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.75rem' }}>AN</div>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.75rem', textTransform: 'uppercase' }}>{currentUser.substring(0, 2)}</div>
             </div>
+            <button onClick={handleLogout} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-dim)', padding: '0.25rem' }}>
+              <Settings size={18} /> {/* Using an icon as a proxy for logout to keep it clean, or could use an explicit logout if preferred. Just using settings icon for now */}
+              <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}>Logout</span>
+            </button>
           </div>
         </header>
 
@@ -464,15 +934,19 @@ export default function Home() {
                   <div className="stat-value">{results.length}</div>
                 </div>
 
-                <div className="stat-card">
-                  <div className="stat-label">Super Tight MAs</div>
-                  <div className="stat-value" style={{ color: 'var(--success)' }}>{tightCount}</div>
-                </div>
+                {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
+                  <>
+                    <div className="stat-card">
+                      <div className="stat-label">Super Tight MAs</div>
+                      <div className="stat-value" style={{ color: 'var(--success)' }}>{tightCount}</div>
+                    </div>
 
-                <div className="stat-card">
-                  <div className="stat-label">Rocket Spikes</div>
-                  <div className="stat-value" style={{ color: 'var(--accent)' }}>{spikeCount}</div>
-                </div>
+                    <div className="stat-card">
+                      <div className="stat-label">Rocket Spikes</div>
+                      <div className="stat-value" style={{ color: 'var(--accent)' }}>{spikeCount}</div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="data-card">
@@ -508,10 +982,14 @@ export default function Home() {
                       <tr>
                         <th>Ticker</th>
                         <th>Market Price</th>
-                        <th>Ratio Volume</th>
-                        <th>MA Tightness</th>
-                        <th>MA Distance</th>
-                        <th>20D Evolution</th>
+                        {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
+                          <>
+                            <th>Ratio Volume</th>
+                            <th>MA Tightness</th>
+                            <th>MA Distance</th>
+                            <th>20D Evolution</th>
+                          </>
+                        )}
                         <th>Action</th>
                       </tr>
                     </thead>
@@ -553,25 +1031,29 @@ export default function Home() {
                             <td>
                               <div style={{ fontWeight: 700 }}>{stock.price.toLocaleString('id-ID')}</div>
                             </td>
-                            <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span style={{ fontWeight: 600 }}>{stock.volumeRatio.toFixed(1)}x</span>
-                                {stock.isVolumeSpike && <Rocket size={14} color="var(--accent)" fill="var(--accent)" />}
-                              </div>
-                            </td>
-                            <td>
-                              <span className={`badge ${stock.tightness < 0.1 ? 'badge-cyan' : ''}`}>
-                                {(stock.tightness * 100).toFixed(1)}%
-                              </span>
-                            </td>
-                            <td>
-                              <span className="badge badge-indigo" style={{ background: 'rgba(99, 102, 241, 0.05)' }}>
-                                +{(stock.distance * 100).toFixed(2)}%
-                              </span>
-                            </td>
-                            <td>
-                              <Sparkline data={stock.sparkline} color={stock.distance > 0 ? '#6366f1' : '#f43f5e'} />
-                            </td>
+                            {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
+                              <>
+                                <td>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ fontWeight: 600 }}>{stock.volumeRatio.toFixed(1)}x</span>
+                                    {stock.isVolumeSpike && <Rocket size={14} color="var(--accent)" fill="var(--accent)" />}
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className={`badge ${stock.tightness < 0.1 ? 'badge-cyan' : ''}`}>
+                                    {(stock.tightness * 100).toFixed(1)}%
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="badge badge-indigo" style={{ background: 'rgba(99, 102, 241, 0.05)' }}>
+                                    +{(stock.distance * 100).toFixed(2)}%
+                                  </span>
+                                </td>
+                                <td>
+                                  <Sparkline data={stock.sparkline} color={stock.distance > 0 ? '#6366f1' : '#f43f5e'} />
+                                </td>
+                              </>
+                            )}
                             <td>
                               <div style={{ display: 'flex', gap: '0.4rem' }}>
                                 <button
@@ -748,6 +1230,100 @@ export default function Home() {
                 </div>
               </div>
             </>
+          ) : activeTab === 'admin' && currentUser === 'admin' ? (
+            <>
+              {/* Admin Panel View */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h2 style={{ fontSize: '1.25rem' }}>User Administration</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Manage trader accounts and subscription trials</p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) 2fr', gap: '2rem' }}>
+                {/* Form Add User */}
+                <div className="data-card" style={{ padding: '1.5rem', height: 'fit-content' }}>
+                  <h3 style={{ marginBottom: '1.5rem', fontSize: '1rem' }}>Create New Account</h3>
+                  <form onSubmit={handleAddUser} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>Username</label>
+                      <input
+                        type="text"
+                        value={newUsername}
+                        onChange={(e) => setNewUsername(e.target.value)}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-main)' }}
+                        placeholder="e.g. joni_trader"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>Password</label>
+                      <input
+                        type="text"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-main)' }}
+                        placeholder="Secure password"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>Limit Type</label>
+                      <select
+                        value={newLimitType}
+                        onChange={(e) => setNewLimitType(e.target.value as 'subscription' | 'quota')}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-main)' }}
+                      >
+                        <option value="subscription">Time-based Subscription</option>
+                        <option value="quota">Fixed Screening Quota</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>
+                        {newLimitType === 'subscription' ? 'Valid For (Days)' : 'Total Allowed Screenings'}
+                      </label>
+                      <input
+                        type="number"
+                        value={newLimitValue}
+                        onChange={(e) => setNewLimitValue(Number(e.target.value))}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg-app)', color: 'var(--text-main)' }}
+                        min="1"
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', padding: '0.75rem' }}>
+                      <Plus size={16} />
+                      Add User
+                    </button>
+                  </form>
+                </div>
+
+                {/* Users List */}
+                <div className="data-card">
+                  <div className="card-header">
+                    <h3 className="card-title">Registered Accounts</h3>
+                    <div className="badge badge-indigo">{adminUsers.length} Users</div>
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Username</th>
+                          <th>Password (Plain)</th>
+                          <th>Limit Type</th>
+                          <th>Expiration / Quota</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminUsers.map((u) => (
+                          <AdminUserRow key={u.id} u={u} onDelete={handleDeleteUser} />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
             <>
               {/* Analysis View */}
@@ -899,6 +1475,57 @@ export default function Home() {
             </>
           )}
         </section>
+
+        {/* Toast Container */}
+        <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', zIndex: 9999 }}>
+          {toasts.map((t) => (
+            <div key={t.id} style={{
+              background: t.type === 'error' ? 'var(--rose)' : t.type === 'success' ? '#10b981' : 'var(--text-main)',
+              color: 'white', padding: '1rem 1.5rem', borderRadius: '0.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.875rem', fontWeight: 500
+            }}>
+              {t.type === 'error' && <TrendingDown size={16} />}
+              {t.type === 'success' && <CheckCircle2 size={16} />}
+              {t.type === 'info' && <Bell size={16} />}
+              {t.message}
+            </div>
+          ))}
+        </div>
+
+        {/* Confirm Modal */}
+        {confirmModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+            <div className="data-card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', color: 'var(--text-main)' }}>
+                <div style={{ padding: '0.5rem', background: 'rgba(244,63,94,0.1)', color: 'var(--rose)', borderRadius: '50%' }}>
+                  <Trash2 size={24} />
+                </div>
+                <h3 style={{ fontSize: '1.25rem', margin: 0 }}>{confirmModal.title}</h3>
+              </div>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1.5rem', lineHeight: 1.5 }}>{confirmModal.message}</p>
+              {confirmModal.submessage && (
+                <div style={{ padding: '0.75rem', background: 'rgba(244,63,94,0.05)', border: '1px solid rgba(244,63,94,0.2)', color: 'var(--rose)', borderRadius: '0.5rem', fontSize: '0.75rem', marginBottom: '1.5rem', lineHeight: 1.4 }}>
+                  {confirmModal.submessage}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  onClick={() => setConfirmModal(null)}
+                  style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmModal.onConfirm}
+                  style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: 'none', background: 'var(--rose)', color: 'white', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600 }}
+                >
+                  Permanently Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     </div >
   );
