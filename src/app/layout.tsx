@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mantra - Master the Market",
+  title: "carisaham.net - Master the Market",
   description: "Professional stock screening toolkit",
 };
 

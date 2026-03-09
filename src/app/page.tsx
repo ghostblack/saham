@@ -760,7 +760,7 @@ export default function Home() {
         <div className="data-card" style={{ padding: '2rem', width: '100%', maxWidth: '400px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2.5rem' }}>
             <Activity size={28} color="var(--primary)" />
-            <span style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.5px' }}>Mantra</span>
+            <span style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.5px' }}>carisaham.net</span>
           </div>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', textAlign: 'center' }}>Login to Access</h2>
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -802,7 +802,7 @@ export default function Home() {
       <aside className="sidebar">
         <div className="logo">
           <Zap size={28} fill="currentColor" />
-          <span>Mantra</span>
+          <span>carisaham.net</span>
         </div>
 
         <nav className="nav-section">
