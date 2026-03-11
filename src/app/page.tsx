@@ -57,6 +57,10 @@ interface StockResult {
   distance: number;
   smaValues: Record<string, number>;
   sparkline: number[];
+  bottomType?: string;
+  isHammer?: boolean;
+  gainFromCross?: number;
+  status?: string;
 }
 
 interface WatchlistItem {
@@ -239,19 +243,30 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cached, setCached] = useState(false);
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-  const [sortBy, setSortBy] = useState<'volume' | 'distance' | 'tightness' | 'ticker'>('distance');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [sortBy, setSortBy] = useState<string>('distance');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [searchQuery, setSearchQuery] = useState('');
+  
   // Watchlist State
-  const [activeTab, setActiveTab] = useState<'screener' | 'watchlist' | 'analysis' | 'history' | 'admin'>('screener');
+  const [activeTab, setActiveTab] = useState<'screener_awan' | 'screener_swing' | 'screener_turnaround' | 'watchlist' | 'analysis' | 'history' | 'admin'>('screener_awan');
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [watchlistData, setWatchlistData] = useState<any[]>([]);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistSortBy, setWatchlistSortBy] = useState<string>('entryDate');
+  const [watchlistSortOrder, setWatchlistSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // History State
   const [history, setHistory] = useState<any[]>([]);
+  const [historySortBy, setHistorySortBy] = useState<string>('timestamp');
+  const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Admin State
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminSortBy, setAdminSortBy] = useState<string>('id');
+  const [adminSortOrder, setAdminSortOrder] = useState<'asc' | 'desc'>('asc');
+
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newLimitType, setNewLimitType] = useState<'subscription' | 'quota'>('subscription');
@@ -397,6 +412,13 @@ export default function Home() {
     }
   }, [watchlist, activeTab]);
 
+  const screeningStrategy = activeTab === 'screener_swing' ? 'swing_mingguan' : activeTab === 'screener_turnaround' ? 'turnaround' : 'diatas_awan';
+
+  useEffect(() => {
+    setResults([]);
+    setCached(false);
+  }, [activeTab]);
+
   const calculateTradePlan = (stock: StockResult) => {
     let entry = stock.price;
     let strategy: 'HAKA' | 'ANTRI' = 'ANTRI';
@@ -530,11 +552,12 @@ export default function Home() {
     try {
       if (!force) {
         // First, check for cache
-        const cacheRes = await fetch('/api/screen');
+        const cacheRes = await fetch(`/api/screen?strategy=${screeningStrategy}`);
         const cacheData = await cacheRes.json();
         if (cacheData.cached && cacheData.results.length > 0) {
           setResults(cacheData.results);
           setCached(true);
+          setCacheTimestamp(cacheData.timestamp);
           setLoading(false);
           setProgress(null);
           return;
@@ -553,7 +576,7 @@ export default function Home() {
         const response = await fetch('/api/screen', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tickers: batch, forceRefresh: force })
+          body: JSON.stringify({ tickers: batch, forceRefresh: force, strategy: screeningStrategy })
         });
 
         if (!response.ok) throw new Error('Failed to fetch batch');
@@ -571,6 +594,18 @@ export default function Home() {
       }
 
       setProgress({ current: total, total });
+
+      // Save to Global Cache
+      if (allResults.length > 0) {
+        const ts = Date.now();
+        await fetch('/api/screen', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ results: allResults, strategy: screeningStrategy })
+        });
+        setCacheTimestamp(ts);
+        setCached(true);
+      }
     } catch (err) {
       setError('An error occurred during screening');
       console.error(err);
@@ -722,19 +757,39 @@ export default function Home() {
     // User must click the "Refresh Screen" button manually
   }, [isLoggedIn]);
 
+  const SortIcon = ({ active, order }: { active: boolean, order: 'asc'|'desc' }) => {
+    if (!active) return <span style={{opacity: 0.3, marginLeft: 4}}><TrendingUp size={12} /></span>;
+    return <span style={{marginLeft: 4, color: 'var(--primary)'}}>{order === 'asc' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}</span>;
+  };
+
+  const handleSort = (key: string, currentSortBy: string, currentSortOrder: 'asc'|'desc', setSort: any, setOrder: any) => {
+    if (currentSortBy === key) {
+      setOrder(currentSortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSort(key);
+      setOrder('desc');
+    }
+  };
+
   const sortedResults = [...results]
     .filter(r => r.ticker.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
-      let valA, valB;
+      let valA: any, valB: any;
       if (sortBy === 'volume') {
-        valA = a.volumeRatio;
-        valB = b.volumeRatio;
+        valA = a.volumeRatio || 0;
+        valB = b.volumeRatio || 0;
       } else if (sortBy === 'distance') {
-        valA = a.distance;
-        valB = b.distance;
+        valA = a.distance || 0;
+        valB = b.distance || 0;
       } else if (sortBy === 'tightness') {
-        valA = a.tightness;
-        valB = b.tightness;
+        valA = a.tightness || 0;
+        valB = b.tightness || 0;
+      } else if (sortBy === 'price') {
+        valA = a.price;
+        valB = b.price;
+      } else if (sortBy === 'crossoverGain') {
+        valA = a.gainFromCross || 0;
+        valB = b.gainFromCross || 0;
       } else {
         valA = a.ticker;
         valB = b.ticker;
@@ -744,6 +799,51 @@ export default function Home() {
       if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
+
+  const sortedWatchlist = [...watchlist].sort((a, b) => {
+    let valA: any, valB: any;
+    const dataA = watchlistData.find(d => d.ticker === a.ticker);
+    const dataB = watchlistData.find(d => d.ticker === b.ticker);
+    const cpA = dataA ? dataA.currentPrice : a.entryPrice;
+    const cpB = dataB ? dataB.currentPrice : b.entryPrice;
+    
+    if (watchlistSortBy === 'ticker') { valA = a.ticker; valB = b.ticker; }
+    else if (watchlistSortBy === 'entryPrice') { valA = a.entryPrice; valB = b.entryPrice; }
+    else if (watchlistSortBy === 'currentPrice') { valA = cpA; valB = cpB; }
+    else if (watchlistSortBy === 'pl') { valA = ((cpA - a.entryPrice) / a.entryPrice); valB = ((cpB - b.entryPrice) / b.entryPrice); }
+    else { valA = new Date(a.entryDate).getTime(); valB = new Date(b.entryDate).getTime(); }
+
+    if (valA < valB) return watchlistSortOrder === 'asc' ? -1 : 1;
+    if (valA > valB) return watchlistSortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const sortedHistory = [...history].sort((a, b) => {
+    let valA: any, valB: any;
+    if (historySortBy === 'ticker') { valA = a.ticker; valB = b.ticker; }
+    else if (historySortBy === 'type') { valA = a.type; valB = b.type; }
+    else if (historySortBy === 'entry') { valA = a.entry; valB = b.entry; }
+    else if (historySortBy === 'lots') { valA = a.lots; valB = b.lots; }
+    else if (historySortBy === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
+    else if (historySortBy === 'rrRatio') { valA = a.rrRatio; valB = b.rrRatio; }
+    else { valA = new Date(a.timestamp).getTime(); valB = new Date(b.timestamp).getTime(); }
+
+    if (valA < valB) return historySortOrder === 'asc' ? -1 : 1;
+    if (valA > valB) return historySortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const sortedAdminUsers = [...adminUsers].sort((a, b) => {
+    let valA: any, valB: any;
+    if (adminSortBy === 'limitType') { valA = a.limitType; valB = b.limitType; }
+    else if (adminSortBy === 'quota') { valA = a.quota; valB = b.quota; }
+    else if (adminSortBy === 'validUntil') { valA = new Date(a.validUntil || 0).getTime(); valB = new Date(b.validUntil || 0).getTime(); }
+    else { valA = a.id; valB = b.id; }
+
+    if (valA < valB) return adminSortOrder === 'asc' ? -1 : 1;
+    if (valA > valB) return adminSortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
 
   const spikeCount = results.filter(r => r.isVolumeSpike).length;
   const tightCount = results.filter(r => r.tightness < 0.05).length;
@@ -757,13 +857,17 @@ export default function Home() {
   if (!isLoggedIn) {
     return (
       <div className="app-layout" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-body)' }}>
-        <div className="data-card" style={{ padding: '2rem', width: '100%', maxWidth: '400px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2.5rem' }}>
-            <Activity size={28} color="var(--primary)" />
-            <span style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.5px' }}>carisaham.net</span>
+        <div className="data-card" style={{ padding: '2.5rem', width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
+            <img
+              src="https://ik.imagekit.io/gambarid/Carisaham/WhatsApp%20Image%202026-03-10%20at%2004.00.08.jpeg"
+              alt="carisaham.net logo"
+              style={{ width: '80px', height: '80px', borderRadius: '1.25rem', objectFit: 'cover', boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)' }}
+            />
+            <span style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.5px', color: 'var(--primary)', fontFamily: "'Playfair Display', serif" }}>carisaham.net</span>
           </div>
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', textAlign: 'center' }}>Login to Access</h2>
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <h2 style={{ fontSize: '1.1rem', marginBottom: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 500 }}>Login to Access Platform</h2>
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Username</label>
               <input
@@ -787,8 +891,8 @@ export default function Home() {
               />
             </div>
             {loginError && <div style={{ color: 'var(--rose)', fontSize: '0.75rem', textAlign: 'center' }}>{loginError}</div>}
-            <button type="submit" className="btn-primary" style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', justifyContent: 'center' }}>
-              Login
+            <button type="submit" className="btn-primary" style={{ width: '100%', padding: '0.875rem', marginTop: '0.5rem', justifyContent: 'center', fontSize: '0.875rem' }}>
+              Sign In
             </button>
           </form>
         </div>
@@ -800,20 +904,40 @@ export default function Home() {
     <div className="app-layout">
       {/* Sidebar */}
       <aside className="sidebar">
-        <div className="logo">
-          <Zap size={28} fill="currentColor" />
+        <div className="logo" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2.5rem' }}>
+          <img
+            src="https://ik.imagekit.io/gambarid/Carisaham/WhatsApp%20Image%202026-03-10%20at%2004.00.08.jpeg"
+            alt="Logo"
+            style={{ width: '32px', height: '32px', borderRadius: '0.5rem', objectFit: 'cover' }}
+          />
           <span>carisaham.net</span>
         </div>
 
         <nav className="nav-section">
           <div className="nav-label">General</div>
           <button
-            onClick={() => setActiveTab('screener')}
-            className={`nav-item ${activeTab === 'screener' ? 'active' : ''}`}
+            onClick={() => setActiveTab('screener_awan')}
+            className={`nav-item ${activeTab === 'screener_awan' ? 'active' : ''}`}
+            style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+          >
+            <Rocket size={20} />
+            <span>Screener - Diatas Awan</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('screener_swing')}
+            className={`nav-item ${activeTab === 'screener_swing' ? 'active' : ''}`}
             style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
           >
             <LayoutDashboard size={20} />
-            <span>Dashboard</span>
+            <span>Screener - Swing Mingguan</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('screener_turnaround')}
+            className={`nav-item ${activeTab === 'screener_turnaround' ? 'active' : ''}`}
+            style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+          >
+            <TrendingUp size={20} />
+            <span>Screener - Turnaround</span>
           </button>
           <button
             onClick={() => setActiveTab('watchlist')}
@@ -902,12 +1026,21 @@ export default function Home() {
         </header>
 
         <section className="content-body">
-          {activeTab === 'screener' ? (
+          {activeTab === 'screener_awan' || activeTab === 'screener_swing' || activeTab === 'screener_turnaround' ? (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <div>
                   <h2 style={{ fontSize: '1.25rem' }}>Dashboard Overview</h2>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Market Screening: Price &gt; SMAs + 0-3% Distance</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    {activeTab === 'screener_awan' && "Market Screening: Price > SMAs + Volume Spike + Max 5% gain"}
+                    {activeTab === 'screener_swing' && "Market Screening: Daily MACD Golden Cross & Breakout MA 20/10 (max 15 days ago, < 5% cross gain, < 5% daily gain)"}
+                    {activeTab === 'screener_turnaround' && "Market Screening: Monthly MACD Golden Cross + Volume Accumulation + Breakout"}
+                    {cached && cacheTimestamp && (
+                      <span style={{ marginLeft: '1rem', color: 'var(--primary)', fontWeight: 600 }}>
+                        • Last Scan: {new Date(cacheTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <button className="btn-primary" onClick={() => performScreening(true)} disabled={loading}>
                   {loading ? (
@@ -934,7 +1067,7 @@ export default function Home() {
                   <div className="stat-value">{results.length}</div>
                 </div>
 
-                {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
+                {(currentUser === 'admin' || currentUserLimitType === 'subscription') && activeTab === 'screener_awan' && (
                   <>
                     <div className="stat-card">
                       <div className="stat-label">Super Tight MAs</div>
@@ -953,40 +1086,43 @@ export default function Home() {
                 <div className="card-header">
                   <h3 className="card-title">List of Screened Stocks</h3>
                   <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'var(--bg-app)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
-                      <Filter size={14} color="var(--text-dim)" />
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as any)}
-                        style={{ border: 'none', background: 'transparent', fontSize: '0.75rem', fontWeight: 600, outline: 'none', cursor: 'pointer' }}
-                      >
-                        <option value="distance">Sort by Distance</option>
-                        <option value="volume">Sort by Volume</option>
-                        <option value="tightness">Sort by Tightness</option>
-                        <option value="ticker">Sort by Ticker</option>
-                      </select>
-                      <button
-                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--primary)' }}
-                      >
-                        {sortOrder === 'asc' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                      </button>
-                    </div>
                     {cached && <div className="badge badge-indigo">Cached Data (1h)</div>}
                   </div>
                 </div>
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ minWidth: '800px' }}>
+                <div style={{ overflowX: 'auto' }} className="mobile-table-cards">
+                  <table style={{ minWidth: '100%' }}>
                     <thead>
                       <tr>
-                        <th>Ticker</th>
-                        <th>Market Price</th>
+                        <th onClick={() => handleSort('ticker', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
+                          Ticker <SortIcon active={sortBy === 'ticker'} order={sortOrder} />
+                        </th>
+                        <th onClick={() => handleSort('price', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
+                          Market Price <SortIcon active={sortBy === 'price'} order={sortOrder} />
+                        </th>
                         {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
                           <>
-                            <th>Ratio Volume</th>
-                            <th>MA Tightness</th>
-                            <th>MA Distance</th>
+                            {activeTab !== 'screener_swing' && (
+                              <th onClick={() => handleSort('volume', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
+                                Ratio Volume <SortIcon active={sortBy === 'volume'} order={sortOrder} />
+                              </th>
+                            )}
+                            {activeTab === 'screener_awan' && (
+                              <>
+                                <th>Status</th>
+                                <th onClick={() => handleSort('tightness', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
+                                  MA Tightness <SortIcon active={sortBy === 'tightness'} order={sortOrder} />
+                                </th>
+                                <th onClick={() => handleSort('distance', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
+                                  MA Distance <SortIcon active={sortBy === 'distance'} order={sortOrder} />
+                                </th>
+                              </>
+                            )}
+                            {activeTab === 'screener_swing' && (
+                              <th onClick={() => handleSort('crossoverGain', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
+                                Crossover Gain <SortIcon active={sortBy === 'crossoverGain'} order={sortOrder} />
+                              </th>
+                            )}
                             <th>20D Evolution</th>
                           </>
                         )}
@@ -997,7 +1133,7 @@ export default function Home() {
                       {loading ? (
                         [...Array(5)].map((_, i) => (
                           <tr key={`skeleton-${i}`}>
-                            <td>
+                            <td data-label="Ticker">
                               <div className="ticker-cell">
                                 <div className="skeleton skeleton-circle" />
                                 <div style={{ flex: 1 }}>
@@ -1006,18 +1142,18 @@ export default function Home() {
                                 </div>
                               </div>
                             </td>
-                            <td><div className="skeleton" style={{ width: '50px' }} /></td>
-                            <td><div className="skeleton" style={{ width: '40px' }} /></td>
-                            <td><div className="skeleton" style={{ width: '60px' }} /></td>
-                            <td><div className="skeleton" style={{ width: '50px' }} /></td>
-                            <td><div className="skeleton" style={{ width: '100px', height: '30px' }} /></td>
-                            <td><div className="skeleton" style={{ width: '80px', height: '30px' }} /></td>
+                            <td data-label="Price"><div className="skeleton" style={{ width: '50px' }} /></td>
+                            <td data-label="Vol"><div className="skeleton" style={{ width: '40px' }} /></td>
+                            <td data-label="Tight"><div className="skeleton" style={{ width: '60px' }} /></td>
+                            <td data-label="Dist"><div className="skeleton" style={{ width: '50px' }} /></td>
+                            <td data-label="Spark"><div className="skeleton" style={{ width: '100px', height: '30px' }} /></td>
+                            <td data-label="Action"><div className="skeleton" style={{ width: '80px', height: '30px' }} /></td>
                           </tr>
                         ))
                       ) : sortedResults.length > 0 ? (
                         sortedResults.map((stock) => (
                           <tr key={stock.ticker}>
-                            <td>
+                            <td data-label="Ticker">
                               <div className="ticker-cell">
                                 <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-app)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.625rem', color: 'var(--primary)' }}>
                                   {stock.ticker.substring(0, 2)}
@@ -1028,33 +1164,56 @@ export default function Home() {
                                 </div>
                               </div>
                             </td>
-                            <td>
+                            <td data-label="Market Price">
                               <div style={{ fontWeight: 700 }}>{stock.price.toLocaleString('id-ID')}</div>
                             </td>
                             {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
                               <>
-                                <td>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <span style={{ fontWeight: 600 }}>{stock.volumeRatio.toFixed(1)}x</span>
-                                    {stock.isVolumeSpike && <Rocket size={14} color="var(--accent)" fill="var(--accent)" />}
-                                  </div>
-                                </td>
-                                <td>
-                                  <span className={`badge ${stock.tightness < 0.1 ? 'badge-cyan' : ''}`}>
-                                    {(stock.tightness * 100).toFixed(1)}%
-                                  </span>
-                                </td>
-                                <td>
-                                  <span className="badge badge-indigo" style={{ background: 'rgba(99, 102, 241, 0.05)' }}>
-                                    +{(stock.distance * 100).toFixed(2)}%
-                                  </span>
-                                </td>
-                                <td>
-                                  <Sparkline data={stock.sparkline} color={stock.distance > 0 ? '#6366f1' : '#f43f5e'} />
+                                {activeTab !== 'screener_swing' && (
+                                  <td data-label="Ratio Volume">
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      {stock.isVolumeSpike ? (
+                                        <span style={{ fontWeight: 800, color: 'var(--accent)' }}>Boom 🚀</span>
+                                      ) : (
+                                        <span style={{ fontWeight: 600 }}>{(stock.volumeRatio || 0).toFixed(1)}x</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                )}
+                                {activeTab === 'screener_awan' && (
+                                  <>
+                                    <td data-label="Status">
+                                      {stock.status && (
+                                        <span className={`badge ${stock.status === 'Super Ketat' ? 'badge-amber' : 'badge-emerald'}`} style={{ fontWeight: 800 }}>
+                                          {stock.status}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td data-label="MA Tightness">
+                                      <span className={`badge ${(stock.tightness || 0) < 0.1 ? 'badge-cyan' : ''}`}>
+                                        {((stock.tightness || 0) * 100).toFixed(1)}%
+                                      </span>
+                                    </td>
+                                    <td data-label="MA Distance">
+                                      <span className="badge badge-indigo" style={{ background: 'rgba(99, 102, 241, 0.05)' }}>
+                                        +{((stock.distance || 0) * 100).toFixed(2)}%
+                                      </span>
+                                    </td>
+                                  </>
+                                )}
+                                {activeTab === 'screener_swing' && (
+                                  <td data-label="Crossover Gain">
+                                    <span className="badge badge-indigo" style={{ background: 'rgba(99, 102, 241, 0.05)' }}>
+                                      {stock.gainFromCross !== undefined ? `+${stock.gainFromCross.toFixed(2)}%` : '-'}
+                                    </span>
+                                  </td>
+                                )}
+                                <td data-label="20D Evolution">
+                                  <Sparkline data={stock.sparkline} color={(stock.distance || 0) > 0 || (stock.gainFromCross !== undefined && stock.gainFromCross > 0) ? '#6366f1' : '#f43f5e'} />
                                 </td>
                               </>
                             )}
-                            <td>
+                            <td data-label="Action">
                               <div style={{ display: 'flex', gap: '0.4rem' }}>
                                 <button
                                   onClick={() => addToWatchlist(stock)}
@@ -1109,16 +1268,26 @@ export default function Home() {
                   <div className="badge badge-rose">{watchlist.length} Stocks</div>
                 </div>
 
-                <div style={{ overflowX: 'auto' }}>
+                <div style={{ overflowX: 'auto' }} className="mobile-table-cards">
                   {watchlist.length > 0 ? (
-                    <table>
+                    <table style={{ minWidth: '100%' }}>
                       <thead>
                         <tr>
-                          <th>Ticker</th>
-                          <th>Entry Price (Open)</th>
-                          <th>Current Price (Close)</th>
-                          <th>Profit / Loss</th>
-                          <th>Added Date</th>
+                          <th onClick={() => handleSort('ticker', watchlistSortBy, watchlistSortOrder, setWatchlistSortBy, setWatchlistSortOrder)} style={{cursor: 'pointer'}}>
+                            Ticker <SortIcon active={watchlistSortBy === 'ticker'} order={watchlistSortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('entryPrice', watchlistSortBy, watchlistSortOrder, setWatchlistSortBy, setWatchlistSortOrder)} style={{cursor: 'pointer'}}>
+                            Entry Price (Open) <SortIcon active={watchlistSortBy === 'entryPrice'} order={watchlistSortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('currentPrice', watchlistSortBy, watchlistSortOrder, setWatchlistSortBy, setWatchlistSortOrder)} style={{cursor: 'pointer'}}>
+                            Current Price (Close) <SortIcon active={watchlistSortBy === 'currentPrice'} order={watchlistSortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('pl', watchlistSortBy, watchlistSortOrder, setWatchlistSortBy, setWatchlistSortOrder)} style={{cursor: 'pointer'}}>
+                            Profit / Loss <SortIcon active={watchlistSortBy === 'pl'} order={watchlistSortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('entryDate', watchlistSortBy, watchlistSortOrder, setWatchlistSortBy, setWatchlistSortOrder)} style={{cursor: 'pointer'}}>
+                            Added Date <SortIcon active={watchlistSortBy === 'entryDate'} order={watchlistSortOrder} />
+                          </th>
                           <th>Action</th>
                         </tr>
                       </thead>
@@ -1130,7 +1299,7 @@ export default function Home() {
 
                           return (
                             <tr key={item.ticker}>
-                              <td>
+                              <td data-label="Ticker">
                                 <div className="ticker-cell">
                                   <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>
                                     {item.ticker.substring(0, 2)}
@@ -1138,20 +1307,20 @@ export default function Home() {
                                   <div className="ticker-name">{item.ticker}</div>
                                 </div>
                               </td>
-                              <td>{item.entryPrice.toLocaleString('id-ID')}</td>
-                              <td>
+                              <td data-label="Entry Price">{item.entryPrice.toLocaleString('id-ID')}</td>
+                              <td data-label="Current Price">
                                 {watchlistLoading ? <div className="skeleton" style={{ width: '40px' }} /> : (
                                   <div style={{ fontWeight: 700 }}>{currentPrice.toLocaleString('id-ID')}</div>
                                 )}
                               </td>
-                              <td>
+                              <td data-label="Profit / Loss">
                                 <span className={`badge ${pl >= 0 ? 'badge-cyan' : 'badge-rose'}`} style={{ fontWeight: 800 }}>
                                   {pl >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                                   {pl.toFixed(2)}%
                                 </span>
                               </td>
-                              <td>{item.entryDate}</td>
-                              <td>
+                              <td data-label="Added Date">{item.entryDate}</td>
+                              <td data-label="Action">
                                 <button
                                   onClick={() => removeFromWatchlist(item.ticker)}
                                   style={{ border: 'none', background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer' }}
@@ -1164,6 +1333,7 @@ export default function Home() {
                         })}
                       </tbody>
                     </table>
+
                   ) : (
                     <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)' }}>
                       <Eye size={48} style={{ opacity: 0.2, marginBottom: '1rem' }} />
@@ -1182,45 +1352,60 @@ export default function Home() {
               </div>
 
               <div className="data-card">
-                <div style={{ overflowX: 'auto' }}>
+                <div style={{ overflowX: 'auto' }} className="mobile-table-cards">
                   {history.length > 0 ? (
-                    <table>
+                    <table style={{ minWidth: '100%' }}>
                       <thead>
                         <tr>
-                          <th>Date</th>
-                          <th>Ticker</th>
-                          <th>Type</th>
-                          <th>Entry</th>
-                          <th>Lots</th>
-                          <th>Total Value</th>
+                          <th onClick={() => handleSort('timestamp', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            Date <SortIcon active={historySortBy === 'timestamp'} order={historySortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('ticker', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            Ticker <SortIcon active={historySortBy === 'ticker'} order={historySortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('type', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            Type <SortIcon active={historySortBy === 'type'} order={historySortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('entry', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            Entry <SortIcon active={historySortBy === 'entry'} order={historySortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('lots', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            Lots <SortIcon active={historySortBy === 'lots'} order={historySortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('totalValue', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            Total Value <SortIcon active={historySortBy === 'totalValue'} order={historySortOrder} />
+                          </th>
                           <th>SL / TP</th>
-                          <th>R:R</th>
+                          <th onClick={() => handleSort('rrRatio', historySortBy, historySortOrder, setHistorySortBy, setHistorySortOrder)} style={{cursor: 'pointer'}}>
+                            R:R <SortIcon active={historySortBy === 'rrRatio'} order={historySortOrder} />
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {history.map((record) => (
                           <tr key={record.id}>
-                            <td>{new Date(record.timestamp).toLocaleString('id-ID')}</td>
-                            <td>
+                            <td data-label="Date">{new Date(record.timestamp).toLocaleString('id-ID')}</td>
+                            <td data-label="Ticker">
                               <div style={{ fontWeight: 700 }}>{record.ticker}</div>
                             </td>
-                            <td>
+                            <td data-label="Type">
                               <span className="badge badge-indigo">{record.type}</span>
                             </td>
-                            <td>{record.entry.toLocaleString('id-ID')}</td>
-                            <td>{record.lots}</td>
-                            <td>Rp {record.totalValue.toLocaleString('id-ID')}</td>
-                            <td>
+                            <td data-label="Entry">{record.entry.toLocaleString('id-ID')}</td>
+                            <td data-label="Lots">{record.lots}</td>
+                            <td data-label="Total Value">Rp {record.totalValue.toLocaleString('id-ID')}</td>
+                            <td data-label="SL / TP">
                               <div style={{ fontSize: '0.75rem' }}>
                                 <div style={{ color: 'var(--accent)' }}>SL: {record.sl.toLocaleString('id-ID')}</div>
                                 <div style={{ color: 'var(--success)' }}>TP: {record.tp.toLocaleString('id-ID')}</div>
                               </div>
                             </td>
-                            <td>{record.rrRatio?.toFixed(1)}</td>
+                            <td data-label="R:R">{record.rrRatio?.toFixed(1)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+
                   ) : (
                     <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-dim)' }}>
                       <History size={48} style={{ opacity: 0.2, marginBottom: '1rem' }} />
@@ -1302,14 +1487,20 @@ export default function Home() {
                     <h3 className="card-title">Registered Accounts</h3>
                     <div className="badge badge-indigo">{adminUsers.length} Users</div>
                   </div>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table>
+                  <div style={{ overflowX: 'auto' }} className="mobile-table-cards">
+                    <table style={{ minWidth: '100%' }}>
                       <thead>
                         <tr>
-                          <th>Username</th>
+                          <th onClick={() => handleSort('id', adminSortBy, adminSortOrder, setAdminSortBy, setAdminSortOrder)} style={{cursor: 'pointer'}}>
+                            Username <SortIcon active={adminSortBy === 'id'} order={adminSortOrder} />
+                          </th>
                           <th>Password (Plain)</th>
-                          <th>Limit Type</th>
-                          <th>Expiration / Quota</th>
+                          <th onClick={() => handleSort('limitType', adminSortBy, adminSortOrder, setAdminSortBy, setAdminSortOrder)} style={{cursor: 'pointer'}}>
+                            Limit Type <SortIcon active={adminSortBy === 'limitType'} order={adminSortOrder} />
+                          </th>
+                          <th onClick={() => handleSort('validUntil', adminSortBy, adminSortOrder, setAdminSortBy, setAdminSortOrder)} style={{cursor: 'pointer'}}>
+                            Expiration / Quota <SortIcon active={adminSortBy === 'validUntil'} order={adminSortOrder} />
+                          </th>
                           <th>Status</th>
                           <th>Action</th>
                         </tr>
@@ -1527,6 +1718,63 @@ export default function Home() {
         )}
 
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      {isLoggedIn && (
+        <nav className="mobile-nav">
+          <button
+            onClick={() => setActiveTab('screener_awan')}
+            className={`mobile-nav-item ${activeTab === 'screener_awan' ? 'active' : ''}`}
+          >
+            <Rocket size={20} />
+            <span>D.Awan</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('screener_swing')}
+            className={`mobile-nav-item ${activeTab === 'screener_swing' ? 'active' : ''}`}
+          >
+            <LayoutDashboard size={20} />
+            <span>Swing Mingguan</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('screener_turnaround')}
+            className={`mobile-nav-item ${activeTab === 'screener_turnaround' ? 'active' : ''}`}
+          >
+            <TrendingUp size={20} />
+            <span>Tn.Rdn</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('watchlist')}
+            className={`mobile-nav-item ${activeTab === 'watchlist' ? 'active' : ''}`}
+          >
+            <Eye size={20} />
+            <span>Watchlist</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('analysis')}
+            className={`mobile-nav-item ${activeTab === 'analysis' ? 'active' : ''}`}
+          >
+            <Calculator size={20} />
+            <span>Setup</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`mobile-nav-item ${activeTab === 'history' ? 'active' : ''}`}
+          >
+            <History size={20} />
+            <span>Journal</span>
+          </button>
+          {currentUser === 'admin' && (
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`mobile-nav-item ${activeTab === 'admin' ? 'active' : ''}`}
+            >
+              <Users size={20} />
+              <span>Admin</span>
+            </button>
+          )}
+        </nav>
+      )}
     </div >
   );
 }

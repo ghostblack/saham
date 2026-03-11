@@ -35,3 +35,75 @@ export function calculateMultipleSMAs(data: number[], periods: number[]) {
   });
   return results;
 }
+
+/**
+ * Calculates the Exponential Moving Average (EMA).
+ */
+export function calculateEMA(data: number[], period: number): (number | null)[] {
+  if (data.length < period) {
+    return new Array(data.length).fill(null);
+  }
+
+  const ema: (number | null)[] = new Array(data.length).fill(null);
+
+  // Calculate initial SMA for the first EMA value
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += data[i];
+  }
+  ema[period - 1] = sum / period;
+
+  const multiplier = 2 / (period + 1);
+
+  // Calculate EMA for the rest of the data
+  for (let i = period; i < data.length; i++) {
+    const prevEma = ema[i - 1] as number;
+    ema[i] = (data[i] - prevEma) * multiplier + prevEma;
+  }
+
+  return ema;
+}
+
+/**
+ * Calculates the MACD (Moving Average Convergence Divergence).
+ * Returns macdLine, signalLine, and histogram.
+ */
+export function calculateMACD(
+  data: number[],
+  shortPeriod: number = 12,
+  longPeriod: number = 26,
+  signalPeriod: number = 9
+) {
+  const shortEma = calculateEMA(data, shortPeriod);
+  const longEma = calculateEMA(data, longPeriod);
+
+  const macdLine: (number | null)[] = new Array(data.length).fill(null);
+  const macdLineForSignal: number[] = [];
+
+  for (let i = 0; i < data.length; i++) {
+    if (shortEma[i] !== null && longEma[i] !== null) {
+      const macdVal = (shortEma[i] as number) - (longEma[i] as number);
+      macdLine[i] = macdVal;
+      macdLineForSignal.push(macdVal);
+    }
+  }
+
+  const signalEma = calculateEMA(macdLineForSignal, signalPeriod);
+
+  const signalLine: (number | null)[] = new Array(data.length).fill(null);
+  const histogram: (number | null)[] = new Array(data.length).fill(null);
+
+  // Align the signal line back to the original data's indices
+  let signalIdx = 0;
+  for (let i = 0; i < data.length; i++) {
+    if (macdLine[i] !== null) {
+      if (signalEma[signalIdx] !== null) {
+        signalLine[i] = signalEma[signalIdx];
+        histogram[i] = (macdLine[i] as number) - (signalLine[i] as number);
+      }
+      signalIdx++;
+    }
+  }
+
+  return { macdLine, signalLine, histogram };
+}
