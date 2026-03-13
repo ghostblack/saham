@@ -34,7 +34,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                 // Fetch Daily and Monthly data in parallel for this ticker
                 const [dailyData, monthlyData] = await Promise.all([
                     getHistoricalData(ticker, periodDaily1, period2, '1d'),
-                    getHistoricalData(ticker, periodMonthly1, period2, '1wk') // Use weekly as proxy for MACD turnaround if preferred, or stay as is
+                    getHistoricalData(ticker, periodMonthly1, period2, '1mo')
                 ]);
 
                 // 1. DIATAS AWAN / CARI BOTTOM logic (Daily)
@@ -112,14 +112,8 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                 }
 
                 // 2. TURNAROUND logic (Monthly)
-                // Note: The specific turnaround uses Monthly MACD which requires longer history (3yr monthly)
-                // Let's re-fetch monthly separately if needed, or refine to 1 pass with monthly proxy
-                const turnaroundPeriod1 = new Date();
-                turnaroundPeriod1.setFullYear(period2.getFullYear() - 3);
-                const turnaroundData = await getHistoricalData(ticker, turnaroundPeriod1, period2, '1mo');
-                
-                if (turnaroundData && turnaroundData.length >= 6) {
-                    const validMonthly = (turnaroundData as any[]).filter(d => d.close !== null && d.close !== undefined);
+                if (monthlyData && monthlyData.length >= 6) {
+                    const validMonthly = (monthlyData as any[]).filter(d => d.close !== null && d.close !== undefined);
                     if (validMonthly.length >= 6) {
                         const mCloses = validMonthly.map(d => d.close);
                         const mVolumes = validMonthly.map(d => d.volume || 0);
