@@ -86,15 +86,5 @@ export default function StockDetailPage({ params }: { params: Promise<{ ticker: 
         ) : null}
       </main>
     </div>
-
-      <style jsx global>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        .animate-spin {
-          animation: spin 1s linear infinite;
-        }
-      `}</style>
-    </div>
   );
 }
