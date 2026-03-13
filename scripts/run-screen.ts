@@ -170,15 +170,7 @@ async function runStrategy(strategy: 'diatas_awan' | 'cari_bottom' | 'turnaround
         await sleep(baseDelay + jitter); 
     }
 
-    // Save to Firestore
-    try {
-        console.log(`\nSaving ${results.length} results to system/screening_results_${strategy}`);
-        const cacheRef = doc(db, 'system', `screening_results_${strategy}`);
-        await setDoc(cacheRef, { results, timestamp: Date.now() });
-        console.log('Saved successfully.');
-    } catch (e) {
-        console.error(`Failed to save to Firestore for ${strategy}:`, e);
-    }
+    return results;
 }
 
 async function main() {
@@ -245,9 +237,22 @@ async function main() {
 
         console.log(`Starting screening job for ${tickersToRun.length} tickers...`);
 
-        await runStrategy('diatas_awan', tickersToRun);
-        await runStrategy('cari_bottom', tickersToRun);
-        await runStrategy('turnaround', tickersToRun);
+        const resultsAwan = await runStrategy('diatas_awan', tickersToRun);
+        const resultsBottom = await runStrategy('cari_bottom', tickersToRun);
+        const resultsTurnaround = await runStrategy('turnaround', tickersToRun);
+
+        // Save all to Firestore only at the very end
+        console.log(`\nScreening complete. Saving all results atomically...`);
+        const timestamp = Date.now();
+        
+        const savePromises = [
+            setDoc(doc(db, 'system', 'screening_results_diatas_awan'), { results: resultsAwan, timestamp }),
+            setDoc(doc(db, 'system', 'screening_results_cari_bottom'), { results: resultsBottom, timestamp }),
+            setDoc(doc(db, 'system', 'screening_results_turnaround'), { results: resultsTurnaround, timestamp })
+        ];
+
+        await Promise.all(savePromises);
+        console.log('All results saved successfully to Firestore.');
 
         console.log('\nAll screening jobs completed successfully!');
         process.exit(0);

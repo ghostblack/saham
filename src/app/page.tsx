@@ -1058,23 +1058,6 @@ function AppContent() {
                     </div>
                   </p>
                 </div>
-                <button className="btn-primary" onClick={() => performScreening(true)} disabled={loading}>
-                  {loading ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span className="loading-dots">Screening</span>
-                      {progress && (
-                        <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
-                          {progress.current} / {progress.total}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <RefreshCw size={14} />
-                      <span>Refresh Screen</span>
-                    </>
-                  )}
-                </button>
               </div>
 
               <div className="stats-grid">
