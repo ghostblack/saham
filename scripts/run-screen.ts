@@ -218,12 +218,17 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
 }
 
 async function main() {
-    const email = process.env.ADMIN_EMAIL;
+    let email = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
 
     if (!email || !adminPassword) {
         console.error("Missing ADMIN_EMAIL or ADMIN_PASSWORD ENV.");
         process.exit(1);
+    }
+
+    // Auto-append domain if missing (as per README instructions)
+    if (!email.includes('@')) {
+        email = `${email}@nexus.stock`;
     }
 
     try {
