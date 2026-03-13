@@ -436,16 +436,31 @@ function AppContent() {
   const screeningStrategy = activeTab === 'screener_bottom' ? 'cari_bottom' : activeTab === 'screener_turnaround' ? 'turnaround' : 'diatas_awan';
 
   useEffect(() => {
-    // Load results from cache if available
+    // Load results from cache if available locally first
     const cachedResults = resultsCache[screeningStrategy] || [];
     setResults(cachedResults);
-    
-    // Check if we already have global cache timestamp for this
     setCached(cachedResults.length > 0);
+
+    // REAL-TIME SYNC: Listen for updates from the background screening bot
+    const cacheRef = doc(db, 'system', `screening_results_${screeningStrategy}`);
+    const unsubscribe = onSnapshot(cacheRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const freshResults = data.results || [];
+        setResults(freshResults);
+        setResultsCache(prev => ({ ...prev, [screeningStrategy]: freshResults }));
+        setCached(true);
+        setCacheTimestamp(data.timestamp || Date.now());
+      }
+    }, (err) => {
+      console.error("Firestore sync error:", err);
+    });
 
     // Save active tab to session storage
     sessionStorage.setItem('active_tab', activeTab);
-  }, [activeTab]);
+
+    return () => unsubscribe();
+  }, [activeTab, screeningStrategy]);
 
   useEffect(() => {
     // Save results cache to session storage whenever it updates
@@ -1029,11 +1044,18 @@ function AppContent() {
                     {activeTab === 'screener_awan' && "Market Screening: Price > SMAs + Volume Spike + Max 5% gain"}
                     {activeTab === 'screener_bottom' && "Market Screening: Bottoming (Below all MAs) + MA 10 Cross MA 20 + Bounce at MA 20 (< 3% distance)"}
                     {activeTab === 'screener_turnaround' && "Market Screening: Monthly MACD Golden Cross + Volume Accumulation + Breakout"}
-                    {cached && cacheTimestamp && (
-                      <span style={{ marginLeft: '1rem', color: 'var(--primary)', fontWeight: 600 }}>
-                        • Last Scan: {new Date(cacheTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    )}
+                    <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      {cacheTimestamp && (
+                        <div className="badge badge-indigo" style={{ background: 'var(--primary-light)', padding: '0.4rem 0.75rem', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <Activity size={12} />
+                          <span>Last Updated: {new Date(cacheTimestamp).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                        </div>
+                      )}
+                      <div className="badge badge-success" style={{ padding: '0.4rem 0.75rem', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+                        <span>Autosync Active (15m)</span>
+                      </div>
+                    </div>
                   </p>
                 </div>
                 <button className="btn-primary" onClick={() => performScreening(true)} disabled={loading}>
