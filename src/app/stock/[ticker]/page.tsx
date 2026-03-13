@@ -4,6 +4,7 @@ import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, RefreshCw, AlertCircle } from 'lucide-react';
 import StockDetailView, { StockResult } from '@/components/StockDetailView';
+import { cn } from '@/lib/utils';
 
 export default function StockDetailPage({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = use(params);
@@ -33,98 +34,58 @@ export default function StockDetailPage({ params }: { params: Promise<{ ticker: 
   }, [ticker]);
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--bg-body)', color: 'var(--text-main)' }}>
-      {/* Header / Nav */}
-      <nav style={{ 
-        background: 'white', 
-        padding: '1rem 2rem', 
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+    <div className="flex flex-col h-screen bg-background overflow-hidden">
+      {/* Mini-Header */}
+      <nav className="h-10 px-4 flex items-center justify-between border-b border-border bg-background/90 backdrop-blur-sm shrink-0">
+        <div className="flex items-center gap-4">
           <Link 
             href="/" 
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.5rem', 
-              color: 'var(--text-muted)',
-              textDecoration: 'none',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '0.75rem',
-              transition: 'all 0.2s'
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = 'var(--bg-app)';
-              e.currentTarget.style.color = 'var(--primary)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--text-muted)';
-            }}
+            className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted-foreground/60 hover:text-primary transition-colors"
           >
-            <ChevronLeft size={20} />
-            Back to Dashboard
+            <ChevronLeft size={14} />
+            Dashboard
           </Link>
-          <div style={{ height: '24px', width: '1px', background: 'var(--border)' }}></div>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>
-            Stock Detail <span style={{ color: 'var(--primary)' }}>Analysis</span>
+          <div className="h-4 w-px bg-border/40"></div>
+          <h1 className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground">
+            Analysis <span className="text-primary opacity-40">::</span> {ticker}
           </h1>
         </div>
 
         <button 
           onClick={fetchStockDetail}
           disabled={loading}
-          style={{
-            border: 'none',
-            background: 'var(--primary)',
-            color: 'white',
-            padding: '0.6rem 1rem',
-            borderRadius: '0.75rem',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontWeight: 700,
-            fontSize: '0.85rem'
-          }}
+          className="h-7 px-3 flex items-center gap-2 bg-primary text-white text-[8px] font-black uppercase tracking-widest hover:bg-primary/90 disabled:opacity-50 transition-all"
         >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          Refresh Data
+          <RefreshCw size={10} className={cn(loading && "animate-spin")} />
+          Sync
         </button>
       </nav>
 
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
+      <main className="flex-1 overflow-hidden">
         {loading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10rem 0', gap: '1rem' }}>
-            <div className="spinner" style={{ width: '40px', height: '40px', border: '4px solid var(--primary-light)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-            <p style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Loading sophisticated market data...</p>
+          <div className="h-full flex flex-col items-center justify-center gap-3">
+            <RefreshCw className="h-5 w-5 animate-spin text-primary opacity-40" />
+            <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Streaming Data...</p>
           </div>
         ) : error ? (
-          <div style={{ background: 'rgba(244, 63, 94, 0.05)', border: '1px solid rgba(244, 63, 94, 0.2)', borderRadius: '1.5rem', padding: '4rem', textAlign: 'center' }}>
-            <AlertCircle size={48} color="var(--rose)" style={{ marginBottom: '1rem', opacity: 0.5 }} />
-            <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Oops! Something went wrong</h2>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>{error}</p>
+          <div className="h-full flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
+            <AlertCircle size={32} className="text-rose-500/40 mb-4" />
+            <h2 className="text-[11px] font-black uppercase tracking-widest text-foreground mb-2">Protocol Error</h2>
+            <p className="text-[10px] text-muted-foreground mb-6 font-mono leading-relaxed">{error}</p>
             <button 
               onClick={fetchStockDetail}
-              style={{ padding: '0.75rem 1.5rem', borderRadius: '1rem', border: 'none', background: 'var(--primary)', color: 'white', fontWeight: 700, cursor: 'pointer' }}
+              className="px-6 py-2 border border-primary text-primary text-[9px] font-black uppercase tracking-widest hover:bg-primary hover:text-white transition-all"
             >
-              Try Again
+              Reconnect
             </button>
           </div>
         ) : stock ? (
-          <div className="data-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="h-full w-full overflow-hidden flex flex-col">
             <StockDetailView stock={stock} />
           </div>
         ) : null}
       </main>
+    </div>
 
       <style jsx global>{`
         @keyframes spin {

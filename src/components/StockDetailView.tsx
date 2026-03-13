@@ -3,7 +3,8 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
-import { Target, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
+import { Target, AlertTriangle, TrendingUp, TrendingDown, Activity, Zap, Shield, BarChart3 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface StockResult {
   ticker: string;
@@ -33,42 +34,40 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
   const chartOptions: any = {
     chart: {
       type: 'candlestick',
-      height: 350,
       toolbar: { show: false },
       zoom: { enabled: false },
-      background: 'transparent'
+      background: 'transparent',
+      fontFamily: 'inherit'
     },
-    title: { text: 'Price Action & MAs', align: 'left', style: { fontSize: '14px', color: 'var(--text-main)' } },
     xaxis: { 
       type: 'datetime', 
-      labels: { style: { colors: 'var(--text-muted)', fontSize: '10px' } },
+      labels: { style: { colors: 'var(--text-muted)', fontSize: '8px', fontWeight: 900 } },
       axisBorder: { show: false },
       axisTicks: { show: false }
     },
     yaxis: { 
-      tooltip: { enabled: true }, 
-      labels: { style: { colors: 'var(--text-muted)', fontSize: '10px' } }
+      opposite: true,
+      labels: { style: { colors: 'var(--text-muted)', fontSize: '8px', fontWeight: 900 } }
     },
-    grid: { borderColor: 'var(--border)', strokeDashArray: 4 },
-    legend: { position: 'top', horizontalAlign: 'right', fontSize: '12px' },
+    grid: { borderColor: 'rgba(var(--border-rgb), 0.1)', strokeDashArray: 0 },
+    legend: { show: false },
     plotOptions: {
       candlestick: {
-        colors: { upward: '#22c55e', downward: '#ef4444' }
+        colors: { upward: '#10b981', downward: '#f43f5e' },
+        wick: { useFillColor: true }
       }
     },
-    theme: {
-        mode: 'light' // Adjust based on your global theme if needed
-    }
+    tooltip: { theme: 'dark' }
   };
 
   const series = [
     {
-      name: 'Candlestick',
+      name: 'Price',
       type: 'candlestick',
       data: stock.ohlcData || []
     },
     {
-      name: 'MA 10',
+      name: 'MA10',
       type: 'line',
       data: (stock.ohlcData || []).map((d, i) => ({
         x: d.x,
@@ -76,138 +75,162 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
       }))
     },
     {
-      name: 'MA 20',
+      name: 'MA20',
       type: 'line',
       data: (stock.ohlcData || []).map((d, i) => ({
         x: d.x,
         y: stock.smaFullData?.['20']?.[i] || null
       }))
-    },
-    {
-      name: 'MA 50',
-      type: 'line',
-      data: (stock.ohlcData || []).map((d, i) => ({
-        x: d.x,
-        y: stock.smaFullData?.['50']?.[i] || null
-      }))
-    },
-    {
-      name: 'MA 100',
-      type: 'line',
-      data: (stock.ohlcData || []).map((d, i) => ({
-        x: d.x,
-        y: stock.smaFullData?.['100']?.[i] || null
-      }))
     }
   ];
 
-  // Override stroke colors for MAs
   const finalOptions = {
     ...chartOptions,
     stroke: {
-      width: [1, 2, 2, 2, 2],
-      colors: ['#000', '#f97316', '#22c55e', '#eab308', '#ef4444']
+      width: [1, 1, 1],
+      colors: ['#000', '#f97316', '#10b981']
     }
   };
 
-  // Skenario Beli Tiers
   const smas = [
-    { name: 'MA 10', value: stock.smaValues?.['10'] || 0 },
-    { name: 'MA 20', value: stock.smaValues?.['20'] || 0 },
-    { name: 'MA 50', value: stock.smaValues?.['50'] || 0 },
-    { name: 'MA 100', value: stock.smaValues?.['100'] || 0 }
+    { name: 'MA 10', value: stock.smaValues?.['10'] || 0, color: 'text-orange-500' },
+    { name: 'MA 20', value: stock.smaValues?.['20'] || 0, color: 'text-emerald-500' },
+    { name: 'MA 50', value: stock.smaValues?.['50'] || 0, color: 'text-amber-500' },
+    { name: 'MA 100', value: stock.smaValues?.['100'] || 0, color: 'text-rose-500' }
   ].filter(s => s.value > 0).sort((a, b) => b.value - a.value);
 
   const entry1 = stock.isRocket ? 'HAKA (Market Buy)' : `Antri di ${smas[0]?.name || 'Support'} (~${Math.floor(smas[0]?.value || stock.price)})`;
   const entry2 = `Antri di ${smas[1]?.name || 'Support'} (~${Math.floor(smas[1]?.value || stock.price * 0.97)})`;
-  const entry3 = `Antri di ${smas[2]?.name || 'Support'} (~${Math.floor(smas[2]?.value || stock.price * 0.95)})`;
 
   return (
-    <div style={{ padding: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-        <div style={{ width: 64, height: 64, borderRadius: 16, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.5rem' }}>
-          {stock.ticker.substring(0, 2)}
+    <div className="h-full w-full grid grid-cols-12 grid-rows-6 border-l border-border bg-background font-mono leading-none">
+      
+      {/* 1. TICKER SUMMARY (Top Left) */}
+      <div className="col-span-3 row-span-1 border-r border-b border-border p-4 flex flex-col justify-center gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[24px] font-black tracking-tighter text-foreground">{stock.ticker}</span>
+          {stock.isRocket && <Zap size={14} className="text-primary animate-pulse fill-primary" />}
         </div>
-        <div>
-          <h2 style={{ fontSize: '2rem', margin: 0 }}>{stock.ticker}</h2>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <span className="badge badge-indigo" style={{ fontSize: '0.9rem', padding: '0.4rem 0.8rem' }}>Price: {stock.price.toLocaleString('id-ID')}</span>
-            {stock.isRocket && <span className="badge badge-amber" style={{ fontSize: '0.9rem', padding: '0.4rem 0.8rem' }}>Rocket Status 🚀</span>}
-            {stock.macdStatus && (
-              <span className={`badge ${stock.macdStatus.includes('Golden') ? 'badge-emerald' : stock.macdStatus.includes('Dead') ? 'badge-rose' : 'badge-indigo'}`} style={{ fontSize: '0.9rem', padding: '0.4rem 0.8rem' }}>
-                MACD: {stock.macdStatus}
-              </span>
-            )}
+        <div className="flex flex-wrap gap-2">
+          <div className="text-[10px] font-black px-1.5 py-0.5 border border-primary text-primary uppercase tracking-widest">
+            {stock.price.toLocaleString('id-ID')}
           </div>
-        </div>
-      </div>
-
-      <div style={{ height: '450px', marginBottom: '2rem', background: 'var(--bg-app)', borderRadius: '1.5rem', padding: '1rem', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-        <ReactApexChart options={finalOptions} series={series} type="line" height={400} />
-      </div>
-
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem' }}>
-        <div style={{ background: 'rgba(99, 102, 241, 0.05)', padding: '1.5rem', borderRadius: '1.5rem', border: '1px solid var(--primary-light)' }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.75px', fontWeight: 700 }}>
-            <Target size={20} color="var(--primary)" />
-            Skenario Beli (Piramida)
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ padding: '1rem', background: 'white', borderRadius: '1rem', borderLeft: '5px solid var(--primary)', boxShadow: '0 4px 6px rgba(0,0,0,0.04)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>TIER 1 (50% Modal)</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: '0.4rem', color: 'var(--text-main)' }}>{entry1}</div>
-            </div>
-            <div style={{ padding: '1rem', background: 'white', borderRadius: '1rem', borderLeft: '5px solid var(--success)', boxShadow: '0 4px 6px rgba(0,0,0,0.04)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>TIER 2 (30% Modal)</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: '0.4rem', color: 'var(--text-main)' }}>{entry2}</div>
-            </div>
-            <div style={{ padding: '1rem', background: 'white', borderRadius: '1rem', borderLeft: '5px solid var(--amber)', boxShadow: '0 4px 6px rgba(0,0,0,0.04)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>TIER 3 (20% Modal)</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: '0.4rem', color: 'var(--text-main)' }}>{entry3}</div>
-            </div>
-          </div>
-          {stock.isRocket && (
-            <div style={{ marginTop: '1.25rem', padding: '1rem', background: 'rgba(249, 115, 22, 0.1)', borderRadius: '1rem', display: 'flex', gap: '0.75rem', alignItems: 'flex-start', border: '1px solid rgba(249, 115, 22, 0.2)' }}>
-              <AlertTriangle size={20} color="#f97316" style={{ marginTop: '2px' }} />
-              <p style={{ fontSize: '0.85rem', color: '#9a3412', margin: 0, lineHeight: 1.5 }}>
-                <strong style={{ display: 'block', fontSize: '1rem', marginBottom: '0.25rem' }}>Volume Spike Detected!</strong> 
-                Disarankan untuk HAKA (beli kanan) di tier 1 agar tidak tertinggal momentum breakout. Pastikan money management tetap terjaga.
-              </p>
+          {stock.macdStatus && (
+            <div className={cn(
+              "text-[8px] font-black px-1.5 py-0.5 border uppercase tracking-widest",
+              stock.macdStatus.includes('Golden') ? "border-emerald-500 text-emerald-500" : "border-border text-muted-foreground"
+            )}>
+              MACD: {stock.macdStatus}
             </div>
           )}
         </div>
+      </div>
 
-        <div style={{ background: 'var(--bg-body)', padding: '1.5rem', borderRadius: '1.5rem', border: '1px solid var(--border)' }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: '1.5rem', textTransform: 'uppercase', letterSpacing: '0.75px', fontWeight: 700 }}>Market Analysis Details</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-            {smas.map(sma => (
-              <div key={sma.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{sma.name} Support</span>
-                <span style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-main)' }}>{Math.floor(sma.value).toLocaleString('id-ID')}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>MA Tightness Index</span>
-              <span style={{ fontWeight: 600, fontSize: '1rem', color: ((stock.tightness || 0) < 0.05 ? 'var(--success)' : 'var(--text-main)') }}>
-                {((stock.tightness || 0) * 100).toFixed(2)}%
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Nearest MA Distance</span>
-              <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--primary)' }}>
-                +{((stock.distance || 0) * 100).toFixed(2)}%
-              </span>
-            </div>
-          </div>
-          <div style={{ marginTop: '2rem', padding: '1rem', background: 'var(--primary-light)', borderRadius: '1rem', color: 'var(--primary)' }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Relative Volume (20D)</div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{(stock.volumeRatio || 0).toFixed(2)}x</div>
-            <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>Compared to 20-day average trading volume</div>
-          </div>
+      {/* 2. MAIN TECHNICALS (Top Center) */}
+      <div className="col-span-6 row-span-1 border-r border-b border-border p-4 flex items-center justify-around">
+        <div className="text-center">
+          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">Vol Ratio</div>
+          <div className="text-[18px] font-black tabular-nums text-foreground">{(stock.volumeRatio || 0).toFixed(2)}x</div>
+        </div>
+        <div className="h-8 w-px bg-border/40"></div>
+        <div className="text-center">
+          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">Tightness</div>
+          <div className="text-[18px] font-black tabular-nums text-emerald-500">{((stock.tightness || 0) * 100).toFixed(2)}%</div>
+        </div>
+        <div className="h-8 w-px bg-border/40"></div>
+        <div className="text-center">
+          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">MA Dist</div>
+          <div className="text-[18px] font-black tabular-nums text-primary">+{((stock.distance || 0) * 100).toFixed(1)}%</div>
         </div>
       </div>
+
+      {/* 3. LOGO/STATUS (Top Right) */}
+      <div className="col-span-3 row-span-1 border-b border-border p-4 flex items-center justify-center bg-muted/5">
+        <div className="w-12 h-12 border border-border flex items-center justify-center text-[18px] font-black text-muted-foreground/20">
+          {stock.ticker.substring(0, 2)}
+        </div>
+      </div>
+
+      {/* 4. MAIN CHART (Center Left) */}
+      <div className="col-span-9 row-span-4 border-r border-b border-border bg-black/5 relative min-h-0">
+        <div className="absolute top-2 left-4 z-10 flex gap-4">
+            {smas.slice(0, 2).map(sma => (
+                <div key={sma.name} className="flex items-center gap-1.5">
+                    <div className={cn("w-1.5 h-1.5 rounded-full", sma.color.replace('text', 'bg'))}></div>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">{sma.name}: {Math.floor(sma.value)}</span>
+                </div>
+            ))}
+        </div>
+        <div className="h-full w-full pt-4">
+          <ReactApexChart options={finalOptions} series={series} type="candlestick" height="100%" />
+        </div>
+      </div>
+
+      {/* 5. TRADE PLAN (Center Right) */}
+      <div className="col-span-3 row-span-4 border-b border-border p-5 flex flex-col gap-4">
+         <div className="flex items-center gap-2 mb-2">
+            <Target size={12} className="text-primary" />
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-foreground">Entry Matrix</span>
+         </div>
+         
+         <div className="space-y-3">
+             <div className="p-3 border border-primary/20 bg-primary/5">
+                <div className="text-[7px] font-black text-primary uppercase tracking-[0.2em] mb-1">PRIMARY LOAD :: 60%</div>
+                <div className="text-[11px] font-black text-foreground uppercase tracking-tight leading-tight">{entry1}</div>
+             </div>
+             
+             <div className="p-3 border border-border bg-muted/5">
+                <div className="text-[7px] font-black text-muted-foreground uppercase tracking-[0.2em] mb-1">SECONDARY :: 40%</div>
+                <div className="text-[11px] font-black text-foreground uppercase tracking-tight leading-tight">{entry2}</div>
+             </div>
+         </div>
+
+         {stock.isRocket && (
+            <div className="mt-auto p-3 border border-amber-500/20 bg-amber-500/5 flex items-start gap-2">
+               <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
+               <p className="text-[8px] font-black text-amber-900/60 uppercase leading-relaxed tracking-tighter">
+                  Aggressive accumulation detected. Market buy recommended for primary load.
+               </p>
+            </div>
+         )}
+      </div>
+
+      {/* 6. MA TABLE (Bottom Left) */}
+      <div className="col-span-6 row-span-1 border-r border-border p-4 flex items-center gap-8">
+        <div className="flex items-center gap-2">
+          <Shield size={12} className="text-muted-foreground" />
+          <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">MA Support Layers</span>
+        </div>
+        <div className="flex gap-6 overflow-x-auto scrollbar-hide">
+          {smas.map(sma => (
+            <div key={sma.name} className="whitespace-nowrap flex items-baseline gap-1.5">
+              <span className="text-[8px] font-black text-muted-foreground uppercase">{sma.name}:</span>
+              <span className="text-[10px] font-black text-foreground tabular-nums">{Math.floor(sma.value).toLocaleString('id-ID')}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 7. PERFORMANCE (Bottom Right) */}
+      <div className="col-span-6 row-span-1 p-4 flex items-center justify-end gap-6 bg-muted/5">
+        <div className="flex items-center gap-2">
+          <Activity size={12} className="text-muted-foreground" />
+          <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">Asset Diagnostics</span>
+        </div>
+        <div className="flex gap-4 items-center">
+            {stock.gainFromCross !== undefined && (
+                <div className="flex items-baseline gap-1.5">
+                    <span className="text-[8px] font-black text-muted-foreground uppercase">Signal Perf:</span>
+                    <span className="text-[12px] font-black text-emerald-500 tabular-nums">+{stock.gainFromCross.toFixed(1)}%</span>
+                </div>
+            )}
+            <div className="h-4 w-px bg-border/20"></div>
+            <div className="text-[8px] font-black text-muted-foreground uppercase tracking-widest opacity-40 italic">
+                Data generated at {new Date().toLocaleTimeString()}
+            </div>
+        </div>
+      </div>
+
     </div>
   );
 }
