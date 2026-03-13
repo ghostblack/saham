@@ -92,6 +92,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         // Check Cari Bottom
                         const smaDataBottom = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
                         const macdDataBottom = calculateMACD(closes);
+                        const volumeInfoBottom = checkVolumeSpike(volumes);
                         const bottomResult = checkCariBottom(
                             closes, opens, lows,
                             smaDataBottom[10], smaDataBottom[20], smaDataBottom[50], smaDataBottom[100],
@@ -100,7 +101,8 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         if (bottomResult.isValid) {
                             resultsBottom.push({
                                 ticker, price: currentPrice, volume: currentVolume,
-                                volumeRatio: 0, gainFromCross: bottomResult.gainPercentage,
+                                volumeRatio: volumeInfoBottom.ratio, isVolumeSpike: volumeInfoBottom.isSpike,
+                                gainFromCross: bottomResult.gainPercentage,
                                 smaValues: { '10': smaDataBottom[10][smaDataBottom[10].length - 1], '20': smaDataBottom[20][smaDataBottom[20].length - 1] },
                                 smaFullData: { 10: smaDataBottom[10].slice(-40), 20: smaDataBottom[20].slice(-40), 50: smaDataBottom[50].slice(-40), 100: smaDataBottom[100].slice(-40) },
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
@@ -120,9 +122,23 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const mMacd = calculateMACD(mCloses);
                         const isTurnaround = checkTurnaround(mCloses, mVolumes, mMacd.macdLine, mMacd.signalLine);
                         if (isTurnaround) {
+                            const volumeInfoT = checkVolumeSpike(mVolumes, 6);
+                            
+                            // Find MACD cross index to calculate gain from signal
+                            let crossIndex = -1;
+                            for (let j = mMacd.macdLine.length - 1; j >= 1; j--) {
+                                if (mMacd.macdLine[j]! > mMacd.signalLine[j]! && mMacd.macdLine[j-1]! <= mMacd.signalLine[j-1]!) {
+                                    crossIndex = j;
+                                    break;
+                                }
+                            }
+                            const crossPrice = crossIndex !== -1 ? mCloses[crossIndex] : mCloses[mCloses.length - 1];
+                            const gainFromCross = ((mCloses[mCloses.length - 1] - crossPrice) / crossPrice) * 100;
+
                             resultsTurnaround.push({
                                 ticker, price: mCloses[mCloses.length - 1], volume: mVolumes[mVolumes.length - 1],
-                                isVolumeSpike: true, volumeRatio: 1, smaValues: {},
+                                isVolumeSpike: volumeInfoT.isSpike, volumeRatio: volumeInfoT.ratio, smaValues: {},
+                                gainFromCross,
                                 sparkline: mCloses.slice(-40)
                             });
                             console.log(`[TURNAROUND] FOUND: ${ticker}`);
@@ -201,11 +217,6 @@ async function main() {
 }
 
 main().catch(err => {
-    console.error("Top-level main() failed:", err);
-    process.exit(1);
-});
-
-main().catch(err => {
-    console.error("Top-level main() failed:", err);
+    console.log(`[${new Date().toISOString()}] Top-level main() failed:`, err);
     process.exit(1);
 });

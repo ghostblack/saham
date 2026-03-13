@@ -92,6 +92,7 @@ export async function POST(request: Request) {
             if (strategy === 'cari_bottom') {
                 const smaData = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
                 const macdData = calculateMACD(closes);
+                const volumeInfo = checkVolumeSpike(volumes);
                 const result = checkCariBottom(
                     closes,
                     opens,
@@ -107,17 +108,20 @@ export async function POST(request: Request) {
                 isValid = result.isValid;
                 if (isValid) {
                     validationData = {
-                        volumeRatio: 0,
+                        volumeRatio: volumeInfo.ratio,
+                        isVolumeSpike: volumeInfo.isSpike,
                         gainFromCross: result.gainPercentage,
                         smaValues: {
                             '10': smaData[10][smaData[10].length - 1] || 0,
-                            '20': smaData[20][smaData[20].length - 1] || 0
+                            '20': smaData[20][smaData[20].length - 1] || 0,
+                            '200': smaData[200][smaData[200].length - 1] || 0
                         },
                         smaFullData: {
                             10: smaData[10].slice(-40),
                             20: smaData[20].slice(-40),
                             50: smaData[50].slice(-40),
-                            100: smaData[100].slice(-40)
+                            100: smaData[100].slice(-40),
+                            200: smaData[200].slice(-40)
                         },
                         ohlcData: (data as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
@@ -127,12 +131,17 @@ export async function POST(request: Request) {
                 }
             } else if (strategy === 'turnaround') {
                 const macdData = calculateMACD(closes);
+                const volumeInfo = checkVolumeSpike(volumes, 6); // Rata-rata 6 bulan untuk bulanan
                 isValid = checkTurnaround(closes, volumes, macdData.macdLine, macdData.signalLine);
                 if (isValid) {
+                    const smaData = calculateMultipleSMAs(closes, [10, 20]); // Cukup 10 & 20 untuk context reversal
                     validationData = {
-                        isVolumeSpike: true, // Asumsinya ada volume akumulasi
-                        volumeRatio: 1,
-                        smaValues: {}
+                        isVolumeSpike: volumeInfo.isSpike,
+                        volumeRatio: volumeInfo.ratio,
+                        smaValues: {
+                            '10': smaData[10][smaData[10].length - 1] || 0,
+                            '20': smaData[20][smaData[20].length - 1] || 0
+                        }
                     };
                 }
             } else {

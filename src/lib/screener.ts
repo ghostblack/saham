@@ -94,6 +94,7 @@ export function checkVolumeSpike(volumes: number[], period: number = 20) {
     const currentVolume = volumes[volumes.length - 1];
     const previousVolumes = volumes.slice(-(period + 1), -1);
     const avgVolume = previousVolumes.reduce((a, b) => a + b, 0) / period;
+    if (avgVolume === 0) return { isSpike: false, ratio: 1, isRocket: false };
 
     const ratio = currentVolume / avgVolume;
     return {
