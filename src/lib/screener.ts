@@ -29,25 +29,24 @@ export function validateSmaCriteria(
     smas: Record<number, number | null>,
     periods: number[]
 ) {
-    const corePeriods = periods.filter(p => p !== 5);
+    // Core periods for "Diatas Awan": 10, 20, 50, 100
+    const corePeriods = [10, 20, 50, 100];
     const coreSmas = corePeriods.map(p => smas[p]).filter((v): v is number => v !== null);
 
     if (coreSmas.length !== corePeriods.length) return null;
 
-    // 1. Price above core MAs (10, 20, 50, 100, 200)
+    // 1. Price above core MAs (10, 20, 50, 100)
     const isAboveAllCore = coreSmas.every(sma => currentPrice > sma);
     if (!isAboveAllCore) return null;
 
-    // 2. MAs are tight (Max MA - Min MA) / Price < 20%
+    // 2. MAs are tight (Max MA - Min MA) / Price
     const maxSma = Math.max(...coreSmas);
     const minSma = Math.min(...coreSmas);
     const tightness = (maxSma - minSma) / currentPrice;
-    // Dihilangkan syarat isTight sesuai permintaan User agar tidak terlalu membatasi
 
-    // 3. Price hasn't run up much (0-3% above the highest core MA)
+    // 3. Price distance to nearest MA (highest core MA) must be <= 5%
     const distance = (currentPrice - maxSma) / maxSma;
-    const isLowBreakout = distance >= 0 && distance <= 0.03;
-    if (!isLowBreakout) return null;
+    if (distance > 0.05) return null;
 
     const ma5 = smas[5];
     const isSuperKetat = (ma5 !== undefined && ma5 !== null) && (currentPrice > ma5);
@@ -65,7 +64,7 @@ export function validateSmaCriteria(
  * Checks for a volume spike compared to average.
  */
 export function checkVolumeSpike(volumes: number[], period: number = 20) {
-    if (volumes.length < period + 1) return { isSpike: false, ratio: 1 };
+    if (volumes.length < period + 1) return { isSpike: false, ratio: 1, isRocket: false };
 
     const currentVolume = volumes[volumes.length - 1];
     const previousVolumes = volumes.slice(-(period + 1), -1);
@@ -74,137 +73,87 @@ export function checkVolumeSpike(volumes: number[], period: number = 20) {
     const ratio = currentVolume / avgVolume;
     return {
         isSpike: ratio > 2.0,
+        isRocket: currentVolume > avgVolume,
         ratio
     };
 }
 
 /**
- * FITUR 2: SWING MINGGUAN
+ * FITUR 2: CARI BOTTOM (Bottoming & MA 20 Bounce)
  * Syarat:
- * 1. Harga mulai sideaway setelah dibawah semua MA dalam 20 hari terakhir.
- * 2. Harga close pertama kali diatas MA 20 (bisa terjadi hingga 15 hari lalu).
- * 3. MA 10 pertama kali diatas MA 20 (bisa terjadi hingga 15 hari lalu).
- * 5. MACD harian baru saja Golden Cross (potong Signal ke atas) dalam 5 hari terakhir, atau sedang akan cross.
- * 6. (BARU) Kenaikan intra-day (Open ke Close hari ini) tidak lebih dari 5%.
+ * 1. Harga sebelumnya berada di bawah semua MA (10, 20, 50, 100) dalam 40 hari terakhir (fase downtrend).
+ * 2. MA 10 (Orange) sudah memotong MA 20 (Hijau) ke atas dalam 20 hari terakhir.
+ * 3. Harga saat ini sedang "mantul" (bounce) atau retest di MA 20.
+ * 4. Harga CLOSE saat ini berada di atas MA 20, tapi jaraknya tidak lebih dari 3% dari MA 20.
  */
-export function checkSwingMingguan(
+export function checkCariBottom(
     closes: number[],
     opens: number[],
+    lows: number[],
     sma10: (number | null)[],
     sma20: (number | null)[],
     sma50: (number | null)[],
     sma100: (number | null)[],
-    sma200: (number | null)[],
     macdLine: (number | null)[],
     signalLine: (number | null)[]
 ): { isValid: boolean; gainPercentage?: number } {
-    if (closes.length < 20 || sma100.length < 20) return { isValid: false };
+    if (closes.length < 60 || sma100.length < 60) return { isValid: false };
 
     const len = closes.length;
+    const latestClose = closes[len - 1];
+    const latestMA20 = sma20[len - 1];
+    const latestMA10 = sma10[len - 1];
 
-    // 1. Harga mulai sideaway setelah dibawah semua MA (kecuali MA200) dalam 20 hari terakhir
+    if (latestMA20 === null || latestMA10 === null) return { isValid: false };
+
+    // 1. Cek apakah pernah "di bawah semua MA" dalam 40 hari terakhir (konteks bottoming)
     let everBelowAllMA = false;
-    for (let i = len - 20; i < len; i++) {
+    for (let i = len - 60; i < len - 10; i++) {
         const c = closes[i];
+        const m10 = sma10[i];
         const m20 = sma20[i];
         const m50 = sma50[i];
         const m100 = sma100[i];
         
-        if (m20 !== null && m50 !== null && m100 !== null) {
-            if (c < m20 && c < m50 && c < m100) {
+        if (m10 !== null && m20 !== null && m50 !== null && m100 !== null) {
+            if (c < m10 && c < m20 && c < m50 && c < m100) {
                 everBelowAllMA = true;
                 break;
             }
         }
     }
-
     if (!everBelowAllMA) return { isValid: false };
 
-    // 2 & 3. Cek crossover MA10 di atas MA20 atau Harga Close di atas MA20 dalam 15 hari terakhir
-    const lookback = 15;
-    const startIndex = Math.max(1, len - lookback);
-    
+    // 2. Cek crossover MA 10 (Orange) di atas MA 20 (Hijau) dalam 20 hari terakhir
     let crossFoundIndex = -1;
-    let crossPrice = 0;
+    for (let i = len - 1; i >= len - 20; i--) {
+        const curr10 = sma10[i];
+        const prev10 = sma10[i - 1];
+        const curr20 = sma20[i];
+        const prev20 = sma20[i - 1];
 
-    for (let i = len - 1; i >= startIndex; i--) {
-        const currentClose = closes[i];
-        const prevClose = closes[i - 1];
-        
-        const currentMA20 = sma20[i];
-        const prevMA20 = sma20[i - 1];
-        
-        const currentMA10 = sma10[i];
-        const prevMA10 = sma10[i - 1];
-
-        if (currentMA20 !== null && prevMA20 !== null && currentMA10 !== null && prevMA10 !== null) {
-            const isCloseCrossUpMA20 = currentClose > currentMA20 && prevClose <= prevMA20;
-            const isMA10CrossUpMA20 = currentMA10 > currentMA20 && prevMA10 <= prevMA20;
-
-            if (isCloseCrossUpMA20 || isMA10CrossUpMA20) {
+        if (curr10 !== null && prev10 !== null && curr20 !== null && prev20 !== null) {
+            if (curr10 > curr20 && prev10 <= prev20) {
                 crossFoundIndex = i;
-                crossPrice = currentClose;
-                break; // Ambil crossover paling baru yang ditemukan (karena loop mundur dari array terakhir)
-            }
-        }
-    }
-
-    if (crossFoundIndex === -1) return { isValid: false };
-
-    // 4. Harga saat ini belum naik lebih dari 5% dari harga saat terjadinya crossover
-    const latestClose = closes[len - 1];
-    const latestMA20 = sma20[len - 1];
-
-    if (latestMA20 === null) return { isValid: false };
-
-    // Opsional tambahan stabilitas: Harga saat ini harus tetap berada di atas MA20
-    if (latestClose < latestMA20) return { isValid: false };
-
-    // Toleransi kenaikan maksimal 5% dari harga cross
-    const isGainAcceptable = latestClose <= crossPrice * 1.05;
-    if (!isGainAcceptable) return { isValid: false };
-
-    // Kenaikan intra-day (Open ke Close hari ini) maksimal 5% agar tidak beli saham yang sudah terbang di pucuk
-    const latestOpen = opens[len - 1];
-    const intradayGain = (latestClose - latestOpen) / latestOpen;
-    if (intradayGain > 0.05) return { isValid: false };
-
-    // 7. (BARU) Pastikan MA10 SAAT INI harus berada di atas MA20.
-    // Jika MA10 pernah memotong MA20 ke atas (dalam 15 hari lalu), tapi sekarang sudah memotong ke bawah lagi (dead cross), 
-    // maka setup ini sudah batal/invalid.
-    const latestMA10 = sma10[len - 1];
-    if (latestMA10 === null || latestMA10 <= latestMA20) return { isValid: false };
-
-    const gainPercentage = ((latestClose - crossPrice) / crossPrice) * 100;
-
-    // 5. MACD Golden Cross dalam 5 hari terakhir
-    let hasMacdCross = false;
-    const macdLookback = 5;
-    const macdStartIndex = Math.max(1, len - macdLookback);
-    
-    for (let i = len - 1; i >= macdStartIndex; i--) {
-        const currMacd = macdLine[i];
-        const prevMacd = macdLine[i - 1];
-        const currSignal = signalLine[i];
-        const prevSignal = signalLine[i - 1];
-
-        if (currMacd !== null && prevMacd !== null && currSignal !== null && prevSignal !== null) {
-            // Golden Cross: MACD tadinya <= Signal, sekarang > Signal
-            if (currMacd > currSignal && prevMacd <= prevSignal) {
-                hasMacdCross = true;
                 break;
             }
         }
     }
+    if (crossFoundIndex === -1) return { isValid: false };
 
-    if (!hasMacdCross) {
-        // Toleransi: Jika MACD saat ini sudah di atas signal meskipun cross-nya terjadi lebih dari 5 hari lalu
-        const latestMacd = macdLine[len - 1];
-        const latestSignal = signalLine[len - 1];
-        if (latestMacd === null || latestSignal === null || latestMacd <= latestSignal) {
-            return { isValid: false };
-        }
-    }
+    // 3. Syarat "ANTRI" atau "MANTUL":
+    // Harga sekarang harus di atas MA 20
+    if (latestClose < latestMA20) return { isValid: false };
+
+    // Jarak harga sekarang ke MA 20 tidak boleh lebih dari 3% (area pantulan)
+    const distanceToMA20 = (latestClose - latestMA20) / latestMA20;
+    if (distanceToMA20 > 0.03) return { isValid: false };
+
+    // Tambahan: MA 10 harus tetap di atas MA 20
+    if (latestMA10 <= latestMA20) return { isValid: false };
+
+    const crossPrice = closes[crossFoundIndex];
+    const gainPercentage = ((latestClose - crossPrice) / crossPrice) * 100;
 
     return { isValid: true, gainPercentage };
 }

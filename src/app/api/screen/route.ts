@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkSwingMingguan } from '@/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkCariBottom } from '@/lib/screener';
 import { calculateMultipleSMAs, calculateMACD } from '@/lib/indicators';
 import { IDX_TICKERS } from '@/lib/tickers';
 import { db } from '@/lib/firebase';
@@ -89,17 +89,17 @@ export async function POST(request: Request) {
             let isValid = false;
             let validationData: any = {};
 
-            if (strategy === 'swing_mingguan') {
+            if (strategy === 'cari_bottom') {
                 const smaData = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
                 const macdData = calculateMACD(closes);
-                const result = checkSwingMingguan(
+                const result = checkCariBottom(
                     closes,
                     opens,
+                    lows,
                     smaData[10],
                     smaData[20],
                     smaData[50],
                     smaData[100],
-                    smaData[200],
                     macdData.macdLine,
                     macdData.signalLine
                 );
@@ -112,7 +112,17 @@ export async function POST(request: Request) {
                         smaValues: {
                             '10': smaData[10][smaData[10].length - 1] || 0,
                             '20': smaData[20][smaData[20].length - 1] || 0
-                        }
+                        },
+                        smaFullData: {
+                            10: smaData[10].slice(-40),
+                            20: smaData[20].slice(-40),
+                            50: smaData[50].slice(-40),
+                            100: smaData[100].slice(-40)
+                        },
+                        ohlcData: (data as any[]).slice(-40).map(d => ({
+                            x: new Date(d.date).getTime(),
+                            y: [d.open, d.high, d.low, d.close]
+                        }))
                     };
                 }
             } else if (strategy === 'turnaround') {
@@ -129,22 +139,62 @@ export async function POST(request: Request) {
                 // diatas_awan
                 const gainFromOpen = (currentPrice - currentOpen) / currentOpen;
                 if (gainFromOpen <= 0.05) {
-                    const smaData = calculateMultipleSMAs(closes, SMA_PERIODS);
+                    const smaPeriods = [5, 10, 20, 50, 100];
+                    const smaData = calculateMultipleSMAs(closes, smaPeriods);
+                    const macdData = calculateMACD(closes);
+                    
                     const latestSmas: Record<number, number | null> = {};
-                    SMA_PERIODS.forEach(p => {
+                    smaPeriods.forEach(p => {
                         const values = smaData[p];
                         latestSmas[p] = values[values.length - 1];
                     });
 
-                    const validation = validateSmaCriteria(currentPrice, latestSmas, SMA_PERIODS);
+                    const validation = validateSmaCriteria(currentPrice, latestSmas, smaPeriods);
                     const volumeInfo = checkVolumeSpike(volumes);
 
-                    if (validation && volumeInfo.isSpike) {
+                    if (validation) {
+                        // Calculate MACD Status
+                        const mLine = macdData.macdLine;
+                        const sLine = macdData.signalLine;
+                        const len = mLine.length;
+                        let macdStatus = 'Neutral';
+
+                        if (len >= 2) {
+                            const currM = mLine[len - 1];
+                            const prevM = mLine[len - 2];
+                            const currS = sLine[len - 1];
+                            const prevS = sLine[len - 2];
+
+                            if (currM !== null && prevM !== null && currS !== null && prevS !== null) {
+                                if (currM > currS && prevM <= prevS) {
+                                    macdStatus = 'Golden Cross';
+                                } else if (currM < currS && prevM >= prevS) {
+                                    macdStatus = 'Dead Cross';
+                                } else if (currM > currS) {
+                                    macdStatus = 'Above Signal';
+                                } else {
+                                    macdStatus = 'Below Signal';
+                                }
+                            }
+                        }
+
                         isValid = true;
                         validationData = {
                             volumeRatio: volumeInfo.ratio,
                             isVolumeSpike: volumeInfo.isSpike,
-                            ...validation
+                            isRocket: volumeInfo.isRocket,
+                            macdStatus,
+                            ...validation,
+                            smaFullData: {
+                                10: smaData[10].slice(-40),
+                                20: smaData[20].slice(-40),
+                                50: smaData[50].slice(-40),
+                                100: smaData[100].slice(-40)
+                            },
+                            ohlcData: (data as any[]).slice(-40).map(d => ({
+                                x: new Date(d.date).getTime(),
+                                y: [d.open, d.high, d.low, d.close]
+                            }))
                         };
                     }
                 }
@@ -156,7 +206,7 @@ export async function POST(request: Request) {
                     price: currentPrice,
                     volume: currentVolume,
                     ...validationData,
-                    sparkline: closes.slice(-20)
+                    sparkline: closes.slice(-40)
                 };
             }
             return null;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { db, auth } from '@/lib/firebase';
 import { initializeApp } from 'firebase/app';
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut, createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
@@ -42,8 +43,11 @@ import {
   AlertTriangle,
   History,
   Users,
-  Wallet
+  Wallet,
+  X
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
+const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 import Sparkline from '@/components/Sparkline';
 import { IDX_TICKERS } from '@/lib/tickers';
 
@@ -53,6 +57,7 @@ interface StockResult {
   volume: number;
   volumeRatio: number;
   isVolumeSpike: boolean;
+  isRocket: boolean;
   tightness: number;
   distance: number;
   smaValues: Record<string, number>;
@@ -61,6 +66,9 @@ interface StockResult {
   isHammer?: boolean;
   gainFromCross?: number;
   status?: string;
+  macdStatus?: string;
+  smaFullData?: Record<string, number[]>;
+  ohlcData?: { x: number; y: number[] }[];
 }
 
 interface WatchlistItem {
@@ -162,7 +170,7 @@ function AdminUserRow({ u, onDelete }: { u: AdminUser, onDelete: (username: stri
   );
 }
 
-export default function Home() {
+function AppContent() {
   // Auth State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState<string>('');
@@ -248,9 +256,22 @@ export default function Home() {
   const [sortBy, setSortBy] = useState<string>('distance');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [searchQuery, setSearchQuery] = useState('');
+  const [resultsCache, setResultsCache] = useState<Record<string, StockResult[]>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('screening_results_cache');
+      return saved ? JSON.parse(saved) : {};
+    }
+    return {};
+  });
   
   // Watchlist State
-  const [activeTab, setActiveTab] = useState<'screener_awan' | 'screener_swing' | 'screener_turnaround' | 'watchlist' | 'analysis' | 'history' | 'admin'>('screener_awan');
+  const [activeTab, setActiveTab] = useState<'screener_awan' | 'screener_bottom' | 'screener_turnaround' | 'watchlist' | 'analysis' | 'history' | 'admin'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('active_tab');
+      return (saved as any) || 'screener_awan';
+    }
+    return 'screener_awan';
+  });
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [watchlistData, setWatchlistData] = useState<any[]>([]);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
@@ -412,12 +433,24 @@ export default function Home() {
     }
   }, [watchlist, activeTab]);
 
-  const screeningStrategy = activeTab === 'screener_swing' ? 'swing_mingguan' : activeTab === 'screener_turnaround' ? 'turnaround' : 'diatas_awan';
+  const screeningStrategy = activeTab === 'screener_bottom' ? 'cari_bottom' : activeTab === 'screener_turnaround' ? 'turnaround' : 'diatas_awan';
 
   useEffect(() => {
-    setResults([]);
-    setCached(false);
+    // Load results from cache if available
+    const cachedResults = resultsCache[screeningStrategy] || [];
+    setResults(cachedResults);
+    
+    // Check if we already have global cache timestamp for this
+    setCached(cachedResults.length > 0);
+
+    // Save active tab to session storage
+    sessionStorage.setItem('active_tab', activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    // Save results cache to session storage whenever it updates
+    sessionStorage.setItem('screening_results_cache', JSON.stringify(resultsCache));
+  }, [resultsCache]);
 
   const calculateTradePlan = (stock: StockResult) => {
     let entry = stock.price;
@@ -550,68 +583,29 @@ export default function Home() {
     setProgress({ current: 0, total });
 
     try {
-      if (!force) {
-        // First, check for cache
-        const cacheRes = await fetch(`/api/screen?strategy=${screeningStrategy}`);
-        const cacheData = await cacheRes.json();
-        if (cacheData.cached && cacheData.results.length > 0) {
-          setResults(cacheData.results);
-          setCached(true);
-          setCacheTimestamp(cacheData.timestamp);
-          setLoading(false);
-          setProgress(null);
-          return;
-        }
-      }
+      // Direct fetch from Firestore Cache created by the background cron job!
+      const cacheRef = doc(db, 'system', `screening_results_${screeningStrategy}`);
+      const snap = await getDoc(cacheRef);
 
-      setCached(false);
-      setResults([]);
-      const allResults: StockResult[] = [];
-      const batchSize = 5;
-
-      for (let i = 0; i < total; i += batchSize) {
-        const batch = IDX_TICKERS.slice(i, i + batchSize);
-        setProgress({ current: i, total });
-
-        const response = await fetch('/api/screen', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tickers: batch, forceRefresh: force, strategy: screeningStrategy })
-        });
-
-        if (!response.ok) throw new Error('Failed to fetch batch');
-
-        const data = await response.json();
-        if (data.results) {
-          allResults.push(...data.results);
-          setResults([...allResults]); // Update UI incrementally
-        }
-
-        // Delay between batches to avoid rate limits
-        if (i + batchSize < total) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
-
-      setProgress({ current: total, total });
-
-      // Save to Global Cache
-      if (allResults.length > 0) {
-        const ts = Date.now();
-        await fetch('/api/screen', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ results: allResults, strategy: screeningStrategy })
-        });
-        setCacheTimestamp(ts);
+      if (snap.exists()) {
+        const data = snap.data();
+        const cachedResults = data.results || [];
+        setResults(cachedResults);
+        setResultsCache(prev => ({ ...prev, [screeningStrategy]: cachedResults }));
         setCached(true);
+        setCacheTimestamp(data.timestamp || Date.now());
+      } else {
+        setResults([]);
+        setCached(false);
+        setError("Hasil screening belum tersedia. Menunggu update dari server...");
       }
-    } catch (err) {
-      setError('An error occurred during screening');
-      console.error(err);
+      
+    } catch (err: any) {
+      console.error('Screening fetch error:', err);
+      setError(err.message || 'Gagal memuat hasil screening');
     } finally {
       setLoading(false);
-      setTimeout(() => setProgress(null), 2000);
+      setProgress(null);
     }
   };
 
@@ -924,12 +918,12 @@ export default function Home() {
             <span>Screener - Diatas Awan</span>
           </button>
           <button
-            onClick={() => setActiveTab('screener_swing')}
-            className={`nav-item ${activeTab === 'screener_swing' ? 'active' : ''}`}
+            onClick={() => setActiveTab('screener_bottom')}
+            className={`nav-item ${activeTab === 'screener_bottom' ? 'active' : ''}`}
             style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
           >
-            <LayoutDashboard size={20} />
-            <span>Screener - Swing Mingguan</span>
+            <Zap size={20} />
+            <span>Screener - Cari Bottom</span>
           </button>
           <button
             onClick={() => setActiveTab('screener_turnaround')}
@@ -1026,14 +1020,14 @@ export default function Home() {
         </header>
 
         <section className="content-body">
-          {activeTab === 'screener_awan' || activeTab === 'screener_swing' || activeTab === 'screener_turnaround' ? (
+          {activeTab === 'screener_awan' || activeTab === 'screener_bottom' || activeTab === 'screener_turnaround' ? (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <div>
                   <h2 style={{ fontSize: '1.25rem' }}>Dashboard Overview</h2>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.5rem' }}>
                     {activeTab === 'screener_awan' && "Market Screening: Price > SMAs + Volume Spike + Max 5% gain"}
-                    {activeTab === 'screener_swing' && "Market Screening: Daily MACD Golden Cross & Breakout MA 20/10 (max 15 days ago, < 5% cross gain, < 5% daily gain)"}
+                    {activeTab === 'screener_bottom' && "Market Screening: Bottoming (Below all MAs) + MA 10 Cross MA 20 + Bounce at MA 20 (< 3% distance)"}
                     {activeTab === 'screener_turnaround' && "Market Screening: Monthly MACD Golden Cross + Volume Accumulation + Breakout"}
                     {cached && cacheTimestamp && (
                       <span style={{ marginLeft: '1rem', color: 'var(--primary)', fontWeight: 600 }}>
@@ -1071,12 +1065,12 @@ export default function Home() {
                   <>
                     <div className="stat-card">
                       <div className="stat-label">Super Tight MAs</div>
-                      <div className="stat-value" style={{ color: 'var(--success)' }}>{tightCount}</div>
+                      <div className="stat-value" style={{ color: 'var(--success)' }}>{results.filter(r => r.status === 'Super Ketat').length}</div>
                     </div>
 
                     <div className="stat-card">
                       <div className="stat-label">Rocket Spikes</div>
-                      <div className="stat-value" style={{ color: 'var(--accent)' }}>{spikeCount}</div>
+                      <div className="stat-value" style={{ color: 'var(--accent)' }}>{results.filter(r => r.isRocket).length}</div>
                     </div>
                   </>
                 )}
@@ -1102,14 +1096,15 @@ export default function Home() {
                         </th>
                         {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
                           <>
-                            {activeTab !== 'screener_swing' && (
+                            {activeTab !== 'screener_bottom' && (
                               <th onClick={() => handleSort('volume', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
                                 Ratio Volume <SortIcon active={sortBy === 'volume'} order={sortOrder} />
                               </th>
                             )}
                             {activeTab === 'screener_awan' && (
                               <>
-                                <th>Status</th>
+                                <th>MACD</th>
+                                <th>Status / Rocket</th>
                                 <th onClick={() => handleSort('tightness', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
                                   MA Tightness <SortIcon active={sortBy === 'tightness'} order={sortOrder} />
                                 </th>
@@ -1118,7 +1113,7 @@ export default function Home() {
                                 </th>
                               </>
                             )}
-                            {activeTab === 'screener_swing' && (
+                            {activeTab === 'screener_bottom' && (
                               <th onClick={() => handleSort('crossoverGain', sortBy, sortOrder, setSortBy, setSortOrder)} style={{cursor: 'pointer'}}>
                                 Crossover Gain <SortIcon active={sortBy === 'crossoverGain'} order={sortOrder} />
                               </th>
@@ -1155,13 +1150,16 @@ export default function Home() {
                           <tr key={stock.ticker}>
                             <td data-label="Ticker">
                               <div className="ticker-cell">
-                                <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-app)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.625rem', color: 'var(--primary)' }}>
+                                <Link 
+                                  href={`/stock/${stock.ticker}`}
+                                  style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-app)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.625rem', color: 'var(--primary)', cursor: 'pointer', textDecoration: 'none' }}
+                                >
                                   {stock.ticker.substring(0, 2)}
-                                </div>
-                                <div>
+                                </Link>
+                                <Link href={`/stock/${stock.ticker}`} style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}>
                                   <div className="ticker-name">{stock.ticker}</div>
                                   <div className="ticker-desc">IDX Market</div>
-                                </div>
+                                </Link>
                               </div>
                             </td>
                             <td data-label="Market Price">
@@ -1169,7 +1167,7 @@ export default function Home() {
                             </td>
                             {(currentUser === 'admin' || currentUserLimitType === 'subscription') && (
                               <>
-                                {activeTab !== 'screener_swing' && (
+                                {activeTab !== 'screener_bottom' && (
                                   <td data-label="Ratio Volume">
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                       {stock.isVolumeSpike ? (
@@ -1182,12 +1180,24 @@ export default function Home() {
                                 )}
                                 {activeTab === 'screener_awan' && (
                                   <>
+                                    <td data-label="MACD">
+                                      <span className={`badge ${stock.macdStatus?.includes('Golden') ? 'badge-emerald' : stock.macdStatus?.includes('Dead') ? 'badge-rose' : 'badge-indigo'}`} style={{ fontWeight: 700 }}>
+                                        {stock.macdStatus}
+                                      </span>
+                                    </td>
                                     <td data-label="Status">
-                                      {stock.status && (
-                                        <span className={`badge ${stock.status === 'Super Ketat' ? 'badge-amber' : 'badge-emerald'}`} style={{ fontWeight: 800 }}>
-                                          {stock.status}
-                                        </span>
-                                      )}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                        {stock.status && (
+                                          <span className={`badge ${stock.status === 'Super Ketat' ? 'badge-amber' : 'badge-emerald'}`} style={{ fontWeight: 800 }}>
+                                            {stock.status}
+                                          </span>
+                                        )}
+                                        {stock.isRocket && (
+                                          <span className="badge badge-indigo" title="Rocket Volume" style={{ padding: '0.25rem 0.5rem' }}>
+                                            <Rocket size={12} style={{ color: 'var(--accent)' }} />
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
                                     <td data-label="MA Tightness">
                                       <span className={`badge ${(stock.tightness || 0) < 0.1 ? 'badge-cyan' : ''}`}>
@@ -1201,7 +1211,7 @@ export default function Home() {
                                     </td>
                                   </>
                                 )}
-                                {activeTab === 'screener_swing' && (
+                                {activeTab === 'screener_bottom' && (
                                   <td data-label="Crossover Gain">
                                     <span className="badge badge-indigo" style={{ background: 'rgba(99, 102, 241, 0.05)' }}>
                                       {stock.gainFromCross !== undefined ? `+${stock.gainFromCross.toFixed(2)}%` : '-'}
@@ -1301,10 +1311,10 @@ export default function Home() {
                             <tr key={item.ticker}>
                               <td data-label="Ticker">
                                 <div className="ticker-cell">
-                                  <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>
+                                  <Link href={`/stock/${item.ticker}`} style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, textDecoration: 'none' }}>
                                     {item.ticker.substring(0, 2)}
-                                  </div>
-                                  <div className="ticker-name">{item.ticker}</div>
+                                  </Link>
+                                  <Link href={`/stock/${item.ticker}`} className="ticker-name" style={{ textDecoration: 'none', color: 'inherit' }}>{item.ticker}</Link>
                                 </div>
                               </td>
                               <td data-label="Entry Price">{item.entryPrice.toLocaleString('id-ID')}</td>
@@ -1386,7 +1396,7 @@ export default function Home() {
                           <tr key={record.id}>
                             <td data-label="Date">{new Date(record.timestamp).toLocaleString('id-ID')}</td>
                             <td data-label="Ticker">
-                              <div style={{ fontWeight: 700 }}>{record.ticker}</div>
+                               <Link href={`/stock/${record.ticker}`} style={{ fontWeight: 700, textDecoration: 'none', color: 'var(--primary)' }}>{record.ticker}</Link>
                             </td>
                             <td data-label="Type">
                               <span className="badge badge-indigo">{record.type}</span>
@@ -1730,11 +1740,11 @@ export default function Home() {
             <span>D.Awan</span>
           </button>
           <button
-            onClick={() => setActiveTab('screener_swing')}
-            className={`mobile-nav-item ${activeTab === 'screener_swing' ? 'active' : ''}`}
+            onClick={() => setActiveTab('screener_bottom')}
+            className={`mobile-nav-item ${activeTab === 'screener_bottom' ? 'active' : ''}`}
           >
-            <LayoutDashboard size={20} />
-            <span>Swing Mingguan</span>
+            <Zap size={20} />
+            <span>Cari Bottom</span>
           </button>
           <button
             onClick={() => setActiveTab('screener_turnaround')}
@@ -1775,6 +1785,12 @@ export default function Home() {
           )}
         </nav>
       )}
-    </div >
+    </div>
   );
+}
+
+
+
+export default function App() {
+  return <AppContent />;
 }
