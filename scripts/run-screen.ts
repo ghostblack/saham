@@ -24,38 +24,9 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
     const periodMonthly1 = new Date();
     periodMonthly1.setFullYear(period2.getFullYear() - 3);
 
-    // --- PHASE 1: SMART PRE-FILTER (Bulk Quotes) ---
-    console.log(`Phase 1: Pre-filtering ${tickers.length} tickers for liquidity...`);
-    const liquidTickers: string[] = [];
-    const CHUNK_SIZE_QUOTE = 100;
-    
-    for (let i = 0; i < tickers.length; i += CHUNK_SIZE_QUOTE) {
-        const chunk = tickers.slice(i, i + CHUNK_SIZE_QUOTE);
-        const symbols = chunk.map(t => `${t}.JK`);
-        try {
-            const quotes = await yahooFinance.quote(symbols);
-            quotes.forEach((q: any) => {
-                const ticker = q.symbol.split('.')[0];
-                const price = q.regularMarketPrice;
-                const volume = q.regularMarketVolume;
-                const avgVolume = q.averageDailyVolume3Month;
-                const value = price * volume;
-
-                // Stricter Filter for Liquidity:
-                // 1. Price > 100 (Exclude laggards/thin penny stocks)
-                // 2. Value > 500M (Ensures enough money flowing)
-                // 3. Avg Volume > 200k (Ensures consistent historical liquidity)
-                if (price > 100 && value > 500000000 && (volume > 100000 || avgVolume > 200000)) {
-                    liquidTickers.push(ticker);
-                }
-            });
-        } catch (e) {
-            console.warn(`Warning: Batch quote failed for chunk starting at index ${i}. Skipping pre-filter for these.`);
-            // Fallback: keep all tickers in this chunk if batch fails
-            liquidTickers.push(...chunk);
-        }
-    }
-    console.log(`Pre-filter complete. ${liquidTickers.length}/${tickers.length} tickers passed to Phase 2.`);
+    // --- PHASE 1: PRE-FILTERING (DISABLED - Using all tickers) ---
+    const liquidTickers = tickers;
+    console.log(`Phase 1 Pre-filter skipped. Processing all ${liquidTickers.length} tickers.`);
 
     // --- PHASE 2: DETAILED SCREENING ---
     const CHUNK_SIZE = 3; // Reduced concurrency for stability
