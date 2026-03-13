@@ -10,23 +10,29 @@ export async function getHistoricalData(ticker: string, period1: Date, period2: 
     const symbol = ticker.endsWith('.JK') ? ticker : `${ticker}.JK`;
     for (let i = 0; i <= retries; i++) {
         try {
-            const results = await yahooFinance.historical(symbol, {
+            // Using chart() instead of historical() because it's more reliable for current day data
+            // and usually avoids the "null values" error on market transitions.
+            const result = await yahooFinance.chart(symbol, {
                 period1,
                 period2,
                 interval,
-            }, { validateResult: false });
-            return results;
-        } catch (error: any) {
-            const isDataError = error.message?.includes('null values');
-            
-            // If it's a "null values" error, don't retry.
-            // This happens when Yahoo has the entry for today but no OHLC data yet.
-            // Retrying 3-9 seconds later won't help; it usually takes hours to fix.
-            if (isDataError) {
-                console.warn(`[DATA EMPTY] ${ticker} returned null values. Skipping to save time.`);
+            });
+
+            if (!result || !result.quotes || result.quotes.length === 0) {
                 return null;
             }
 
+            // Map chart data to match the format of historical data used by the rest of the script
+            return result.quotes.map(q => ({
+                date: q.date,
+                open: q.open,
+                high: q.high,
+                low: q.low,
+                close: q.close,
+                volume: q.volume,
+                adjclose: q.adjclose || q.close
+            }));
+        } catch (error: any) {
             if (i === retries) {
                 console.error(`Final failure for ${ticker}: ${error.message}`);
                 return null;
