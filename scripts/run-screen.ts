@@ -33,9 +33,9 @@ async function runStrategy(strategy: 'diatas_awan' | 'cari_bottom' | 'turnaround
         try {
             const data = await getHistoricalData(ticker, period1, period2, interval as any);
             
-            // Bot evasion: randomized delay between 1.5s and 2.0s
-            const baseDelay = 1500;
-            const jitter = Math.random() * 500;
+            // Optimized for speed: randomized delay between 600ms and 800ms
+            const baseDelay = 600;
+            const jitter = Math.random() * 200;
             await sleep(baseDelay + jitter); 
 
             if (!data || data.length < minDataLen) continue;
