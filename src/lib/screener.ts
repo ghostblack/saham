@@ -18,14 +18,21 @@ export async function getHistoricalData(ticker: string, period1: Date, period2: 
             return results;
         } catch (error: any) {
             const isDataError = error.message?.includes('null values');
+            
+            // If it's a "null values" error, don't retry.
+            // This happens when Yahoo has the entry for today but no OHLC data yet.
+            // Retrying 3-9 seconds later won't help; it usually takes hours to fix.
+            if (isDataError) {
+                console.warn(`[DATA EMPTY] ${ticker} returned null values. Skipping to save time.`);
+                return null;
+            }
+
             if (i === retries) {
-                // On last attempt, log error but return null to let the script continue
                 console.error(`Final failure for ${ticker}: ${error.message}`);
                 return null;
             }
             
-            // Wait longer if it's a data validation error (waiting for Yahoo to update its internal cache)
-            const waitTime = isDataError ? 3000 * (i + 1) : 2000 * (i + 1);
+            const waitTime = 2000 * (i + 1);
             console.warn(`Retry ${i + 1}/${retries} for ${ticker} in ${waitTime}ms...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
