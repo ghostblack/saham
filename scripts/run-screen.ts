@@ -3,7 +3,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../src/lib/firebase';
 import { IDX_TICKERS } from '../src/lib/tickers';
 import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkCariBottom, checkBottomBreakSideways } from '../src/lib/screener';
-import { calculateMultipleSMAs, calculateMACD } from '../src/lib/indicators';
+import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '../src/lib/indicators';
 import YahooFinance from 'yahoo-finance2';
 
 const yahooFinance = new YahooFinance();
@@ -103,9 +103,10 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         // Check Cari Bottom
                         const smaDataBottom = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
                         const macdDataBottom = calculateMACD(closes);
+                        const rsiDataBottom = calculateRSI(closes, 14);
                         const volumeInfoBottom = checkVolumeSpike(volumes);
                         const bottomResult = checkCariBottom(
-                            closes, opens, lows, volumes,
+                            closes, opens, lows, volumes, rsiDataBottom,
                             smaDataBottom[10], smaDataBottom[20], smaDataBottom[50], smaDataBottom[100],
                             macdDataBottom.macdLine, macdDataBottom.signalLine
                         );

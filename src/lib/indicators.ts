@@ -107,3 +107,43 @@ export function calculateMACD(
 
   return { macdLine, signalLine, histogram };
 }
+
+/**
+ * Calculates the Relative Strength Index (RSI).
+ * @param data Array of closing prices.
+ * @param period The period for RSI (standard is 14).
+ */
+export function calculateRSI(data: number[], period: number = 14): (number | null)[] {
+  if (data.length <= period) {
+    return new Array(data.length).fill(null);
+  }
+
+  const rsi: (number | null)[] = new Array(data.length).fill(null);
+  const gains: number[] = [];
+  const losses: number[] = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const diff = data[i] - data[i - 1];
+    gains.push(Math.max(0, diff));
+    losses.push(Math.max(0, -diff));
+  }
+
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+  for (let i = period; i < data.length; i++) {
+    if (i > period) {
+      avgGain = (avgGain * (period - 1) + gains[i - 1]) / period;
+      avgLoss = (avgLoss * (period - 1) + losses[i - 1]) / period;
+    }
+
+    if (avgLoss === 0) {
+      rsi[i] = 100;
+    } else {
+      const rs = avgGain / avgLoss;
+      rsi[i] = 100 - 100 / (1 + rs);
+    }
+  }
+
+  return rsi;
+}

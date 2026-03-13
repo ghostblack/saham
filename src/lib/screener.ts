@@ -133,6 +133,7 @@ export function checkCariBottom(
     opens: number[],
     lows: number[],
     volumes: number[],
+    rsi: (number | null)[],
     sma10: (number | null)[],
     sma20: (number | null)[],
     sma50: (number | null)[],
@@ -140,7 +141,7 @@ export function checkCariBottom(
     macdLine: (number | null)[],
     signalLine: (number | null)[]
 ): { isValid: boolean; gainPercentage?: number } {
-    if (closes.length < 60 || sma100.length < 60 || volumes.length < 60) return { isValid: false };
+    if (closes.length < 60 || sma100.length < 60 || volumes.length < 60 || rsi.length < 60) return { isValid: false };
 
     const len = closes.length;
     const latestClose = closes[len - 1];
@@ -148,6 +149,11 @@ export function checkCariBottom(
     const latestMA10 = sma10[len - 1];
 
     if (latestMA20 === null || latestMA10 === null) return { isValid: false };
+
+    // 0. RSI OVERSOLD CHECK: Was RSI < 30 in the last 15 days?
+    const rsiWindow = rsi.slice(-15);
+    const wasOversold = rsiWindow.some(val => val !== null && val < 30);
+    if (!wasOversold) return { isValid: false };
 
     // 1. MUST have been in a "Real Downtrend" 20-10 days ago
     // (Price < MA10, MA20, MA50, MA100)
