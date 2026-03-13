@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { StockLogo } from "@/components/StockLogo"
 
 interface ResultTableProps {
   results: any[]
@@ -169,7 +170,8 @@ export function ResultTable({
               return (
                 <TableRow key={stock.ticker} className="group border-b border-border/40 hover:bg-muted/5 transition-colors">
                   <TableCell className="px-4 py-2 border-r border-border/40">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
+                       <StockLogo ticker={stock.ticker} size="sm" />
                        <Link 
                         href={`/stock/${stock.ticker}`} 
                         className="font-black text-foreground tracking-tighter text-[13px] hover:text-primary transition-colors hover:underline"

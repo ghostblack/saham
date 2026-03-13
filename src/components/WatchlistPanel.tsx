@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { StockLogo } from "@/components/StockLogo"
 
 export function WatchlistPanel({
   watchlist,
@@ -112,9 +113,12 @@ export function WatchlistPanel({
                   return (
                     <TableRow key={item.ticker} className="border-b border-border/40 group transition-all hover:bg-muted/5">
                       <TableCell className="px-6 py-2 border-r border-border/40">
-                        <Link href={`/stock/${item.ticker}`} className="font-black text-foreground text-[13px] hover:text-primary transition-colors block tracking-tighter hover:underline">
-                          {item.ticker}
-                        </Link>
+                        <div className="flex items-center gap-3">
+                          <StockLogo ticker={item.ticker} size="sm" />
+                          <Link href={`/stock/${item.ticker}`} className="font-black text-foreground text-[13px] hover:text-primary transition-colors block tracking-tighter hover:underline">
+                            {item.ticker}
+                          </Link>
+                        </div>
                       </TableCell>
                       <TableCell className="font-bold text-muted-foreground font-mono text-[12px] tabular-nums px-6 border-r border-border/40">
                         {item.entryPrice.toLocaleString('id-ID')}

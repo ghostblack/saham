@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import Sparkline from "@/components/Sparkline"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { StockLogo } from "@/components/StockLogo"
 
 interface StockCardProps {
   stock: any
@@ -26,9 +27,9 @@ export function StockCard({ stock, activeTab, isSaved, onSave, onAnalyze }: Stoc
           <div className="flex items-center gap-4">
             <Link 
               href={`/stock/${stock.ticker}`}
-              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/40 font-black text-foreground text-xs uppercase transition-all group-hover:bg-primary group-hover:text-white group-hover:scale-105"
+              className="transition-all hover:scale-110"
             >
-              {stock.ticker.substring(0, 2)}
+              <StockLogo ticker={stock.ticker} size="lg" className="rounded-2xl" />
             </Link>
             <div>
               <Link href={`/stock/${stock.ticker}`} className="text-base font-black tracking-tight text-foreground hover:text-primary transition-colors block">

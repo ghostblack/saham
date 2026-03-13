@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 import { Target, AlertTriangle, TrendingUp, TrendingDown, Activity, Zap, Shield, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { StockLogo } from '@/components/StockLogo';
 
 export interface StockResult {
   ticker: string;
@@ -107,12 +108,15 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
       
       {/* 1. TICKER SUMMARY (Top Left) */}
       <div className="col-span-3 row-span-1 border-r border-b border-border p-4 flex flex-col justify-center gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[24px] font-black tracking-tighter text-foreground">{stock.ticker}</span>
-          {stock.isRocket && <Zap size={14} className="text-primary animate-pulse fill-primary" />}
+        <div className="flex items-center gap-3">
+          <StockLogo ticker={stock.ticker} size="md" />
+          <div className="flex flex-col">
+            <span className="text-[18px] font-black tracking-tighter text-foreground leading-none">{stock.ticker}</span>
+            {stock.isRocket && <div className="flex items-center gap-1 mt-1"><Zap size={10} className="text-primary fill-primary" /><span className="text-[7px] font-black uppercase text-primary tracking-widest">Rocket Signal</span></div>}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <div className="text-[10px] font-black px-1.5 py-0.5 border border-primary text-primary uppercase tracking-widest">
+        <div className="flex flex-wrap gap-2 mt-1">
+          <div className="text-[9px] font-black px-1.5 py-0.5 border border-primary text-primary uppercase tracking-widest tabular-nums">
             {stock.price.toLocaleString('id-ID')}
           </div>
           {stock.macdStatus && (
@@ -120,7 +124,7 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
               "text-[8px] font-black px-1.5 py-0.5 border uppercase tracking-widest",
               stock.macdStatus.includes('Golden') ? "border-emerald-500 text-emerald-500" : "border-border text-muted-foreground"
             )}>
-              MACD: {stock.macdStatus}
+              {stock.macdStatus}
             </div>
           )}
         </div>
@@ -146,9 +150,7 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
 
       {/* 3. LOGO/STATUS (Top Right) */}
       <div className="col-span-3 row-span-1 border-b border-border p-4 flex items-center justify-center bg-muted/5">
-        <div className="w-12 h-12 border border-border flex items-center justify-center text-[18px] font-black text-muted-foreground/20">
-          {stock.ticker.substring(0, 2)}
-        </div>
+        <StockLogo ticker={stock.ticker} size="lg" className="border-none bg-transparent" />
       </div>
 
       {/* 4. MAIN CHART (Center Left) */}
