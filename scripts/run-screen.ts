@@ -23,116 +23,53 @@ async function runStrategy(strategy: 'diatas_awan' | 'cari_bottom' | 'turnaround
     const interval = strategy === 'turnaround' ? '1mo' : '1d';
     const minDataLen = strategy === 'turnaround' ? 6 : 200;
 
-    for (let i = 0; i < tickers.length; i++) {
-        const ticker = tickers[i];
+    // Process in chunks of 5
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+        const chunk = tickers.slice(i, i + CHUNK_SIZE);
         
         if (i % 50 === 0 && i !== 0) {
             console.log(`Processed ${i}/${tickers.length} tickers for ${strategy}...`);
         }
 
-        try {
-            const data = await getHistoricalData(ticker, period1, period2, interval as any);
-            
-            // Optimized for speed: randomized delay between 600ms and 800ms
-            const baseDelay = 600;
-            const jitter = Math.random() * 200;
-            await sleep(baseDelay + jitter); 
+        const batchResults = await Promise.all(chunk.map(async (ticker) => {
+            try {
+                const data = await getHistoricalData(ticker, period1, period2, interval as any);
+                if (!data || data.length < minDataLen) return null;
 
-            if (!data || data.length < minDataLen) continue;
+                const validData = (data as any[]).filter(d => d.close !== null && d.close !== undefined);
+                if (validData.length < minDataLen) return null;
 
-            const validData = (data as any[]).filter(d => d.close !== null && d.close !== undefined);
-            if (validData.length < minDataLen) continue;
+                const closes = validData.map(d => d.close);
+                const volumes = validData.map(d => d.volume || 0);
+                const opens = validData.map(d => d.open);
+                const highs = validData.map(d => d.high);
+                const lows = validData.map(d => d.low);
 
-            const closes = validData.map(d => d.close);
-            const volumes = validData.map(d => d.volume || 0);
-            const opens = validData.map(d => d.open);
-            const highs = validData.map(d => d.high);
-            const lows = validData.map(d => d.low);
+                const currentPrice = closes[closes.length - 1];
+                const currentVolume = volumes[volumes.length - 1];
+                const currentOpen = opens[opens.length - 1];
 
-            const currentPrice = closes[closes.length - 1];
-            const currentVolume = volumes[volumes.length - 1];
-            const currentOpen = opens[opens.length - 1];
+                let isValid = false;
+                let validationData: any = {};
 
-            let isValid = false;
-            let validationData: any = {};
-
-            if (strategy === 'cari_bottom') {
-                const smaData = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
-                const macdData = calculateMACD(closes);
-                const result = checkCariBottom(
-                    closes, opens, lows,
-                    smaData[10], smaData[20], smaData[50], smaData[100],
-                    macdData.macdLine, macdData.signalLine
-                );
-                isValid = result.isValid;
-                if (isValid) {
-                    validationData = {
-                        volumeRatio: 0,
-                        gainFromCross: result.gainPercentage,
-                        smaValues: {
-                            '10': smaData[10][smaData[10].length - 1] || 0,
-                            '20': smaData[20][smaData[20].length - 1] || 0
-                        },
-                        smaFullData: {
-                            10: smaData[10].slice(-40),
-                            20: smaData[20].slice(-40),
-                            50: smaData[50].slice(-40),
-                            100: smaData[100].slice(-40)
-                        },
-                        ohlcData: validData.slice(-40).map(d => ({
-                            x: new Date(d.date).getTime(),
-                            y: [d.open, d.high, d.low, d.close]
-                        }))
-                    };
-                }
-            } else if (strategy === 'turnaround') {
-                const macdData = calculateMACD(closes);
-                isValid = checkTurnaround(closes, volumes, macdData.macdLine, macdData.signalLine);
-                if (isValid) {
-                    validationData = {
-                        isVolumeSpike: true,
-                        volumeRatio: 1,
-                        smaValues: {}
-                    };
-                }
-            } else {
-                // diatas_awan
-                const gainFromOpen = (currentPrice - currentOpen) / currentOpen;
-                if (gainFromOpen <= 0.05) {
-                    const smaPeriods = [5, 10, 20, 50, 100];
-                    const smaData = calculateMultipleSMAs(closes, smaPeriods);
+                if (strategy === 'cari_bottom') {
+                    const smaData = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
                     const macdData = calculateMACD(closes);
-                    
-                    const latestSmas: Record<number, number | null> = {};
-                    smaPeriods.forEach(p => { latestSmas[p] = smaData[p][smaData[p].length - 1]; });
-
-                    const validation = validateSmaCriteria(currentPrice, latestSmas, smaPeriods);
-                    const volumeInfo = checkVolumeSpike(volumes);
-
-                    if (validation) {
-                        const mLine = macdData.macdLine;
-                        const sLine = macdData.signalLine;
-                        const len = mLine.length;
-                        let macdStatus = 'Neutral';
-
-                        if (len >= 2) {
-                            const currM = mLine[len - 1], prevM = mLine[len - 2];
-                            const currS = sLine[len - 1], prevS = sLine[len - 2];
-                            if (currM !== null && prevM !== null && currS !== null && prevS !== null) {
-                                if (currM > currS && prevM <= prevS) macdStatus = 'Golden Cross';
-                                else if (currM < currS && prevM >= prevS) macdStatus = 'Dead Cross';
-                                else if (currM > currS) macdStatus = 'Above Signal';
-                                else macdStatus = 'Below Signal';
-                            }
-                        }
-
-                        isValid = true;
+                    const result = checkCariBottom(
+                        closes, opens, lows,
+                        smaData[10], smaData[20], smaData[50], smaData[100],
+                        macdData.macdLine, macdData.signalLine
+                    );
+                    isValid = result.isValid;
+                    if (isValid) {
                         validationData = {
-                            volumeRatio: volumeInfo.ratio,
-                            isVolumeSpike: volumeInfo.isSpike,
-                            isRocket: volumeInfo.isRocket,
-                            macdStatus,
-                            ...validation,
+                            volumeRatio: 0,
+                            gainFromCross: result.gainPercentage,
+                            smaValues: {
+                                '10': smaData[10][smaData[10].length - 1] || 0,
+                                '20': smaData[20][smaData[20].length - 1] || 0
+                            },
                             smaFullData: {
                                 10: smaData[10].slice(-40),
                                 20: smaData[20].slice(-40),
@@ -145,22 +82,92 @@ async function runStrategy(strategy: 'diatas_awan' | 'cari_bottom' | 'turnaround
                             }))
                         };
                     }
-                }
-            }
+                } else if (strategy === 'turnaround') {
+                    const macdData = calculateMACD(closes);
+                    isValid = checkTurnaround(closes, volumes, macdData.macdLine, macdData.signalLine);
+                    if (isValid) {
+                        validationData = {
+                            isVolumeSpike: true,
+                            volumeRatio: 1,
+                            smaValues: {}
+                        };
+                    }
+                } else {
+                    // diatas_awan
+                    const gainFromOpen = (currentPrice - currentOpen) / currentOpen;
+                    if (gainFromOpen <= 0.05) {
+                        const smaPeriods = [5, 10, 20, 50, 100];
+                        const smaData = calculateMultipleSMAs(closes, smaPeriods);
+                        const macdData = calculateMACD(closes);
+                        
+                        const latestSmas: Record<number, number | null> = {};
+                        smaPeriods.forEach(p => { latestSmas[p] = smaData[p][smaData[p].length - 1]; });
 
-            if (isValid) {
-                console.log(`[${strategy}] FOUND: ${ticker}`);
-                results.push({
-                    ticker,
-                    price: currentPrice,
-                    volume: currentVolume,
-                    ...validationData,
-                    sparkline: closes.slice(-40)
-                });
+                        const validation = validateSmaCriteria(currentPrice, latestSmas, smaPeriods);
+                        const volumeInfo = checkVolumeSpike(volumes);
+
+                        if (validation) {
+                            const mLine = macdData.macdLine;
+                            const sLine = macdData.signalLine;
+                            const len = mLine.length;
+                            let macdStatus = 'Neutral';
+
+                            if (len >= 2) {
+                                const currM = mLine[len - 1], prevM = mLine[len - 2];
+                                const currS = sLine[len - 1], prevS = sLine[len - 2];
+                                if (currM !== null && prevM !== null && currS !== null && prevS !== null) {
+                                    if (currM > currS && prevM <= prevS) macdStatus = 'Golden Cross';
+                                    else if (currM < currS && prevM >= prevS) macdStatus = 'Dead Cross';
+                                    else if (currM > currS) macdStatus = 'Above Signal';
+                                    else macdStatus = 'Below Signal';
+                                }
+                            }
+
+                            isValid = true;
+                            validationData = {
+                                volumeRatio: volumeInfo.ratio,
+                                isVolumeSpike: volumeInfo.isSpike,
+                                isRocket: volumeInfo.isRocket,
+                                macdStatus,
+                                ...validation,
+                                smaFullData: {
+                                    10: smaData[10].slice(-40),
+                                    20: smaData[20].slice(-40),
+                                    50: smaData[50].slice(-40),
+                                    100: smaData[100].slice(-40)
+                                },
+                                ohlcData: validData.slice(-40).map(d => ({
+                                    x: new Date(d.date).getTime(),
+                                    y: [d.open, d.high, d.low, d.close]
+                                }))
+                            };
+                        }
+                    }
+                }
+
+                if (isValid) {
+                    console.log(`[${strategy}] FOUND: ${ticker}`);
+                    return {
+                        ticker,
+                        price: currentPrice,
+                        volume: currentVolume,
+                        ...validationData,
+                        sparkline: closes.slice(-40)
+                    };
+                }
+            } catch (e) {
+                console.error(`Error processing ${ticker} for ${strategy}:`, e);
             }
-        } catch (e) {
-            console.error(`Error processing ${ticker} for ${strategy}:`, e);
-        }
+            return null;
+        }));
+
+        // Filter out nulls and add to results
+        results.push(...batchResults.filter((r): r is any => r !== null));
+
+        // Delay after each batch for rate limiting
+        const baseDelay = 1500;
+        const jitter = Math.random() * 500;
+        await sleep(baseDelay + jitter); 
     }
 
     // Save to Firestore
