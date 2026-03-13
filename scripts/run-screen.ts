@@ -32,7 +32,11 @@ async function runStrategy(strategy: 'diatas_awan' | 'cari_bottom' | 'turnaround
 
         try {
             const data = await getHistoricalData(ticker, period1, period2, interval as any);
-            await sleep(1000); // 1 second delay per ticker to respect Yahoo Finance limits!
+            
+            // Bot evasion: randomized delay between 1.5s and 2.0s
+            const baseDelay = 1500;
+            const jitter = Math.random() * 500;
+            await sleep(baseDelay + jitter); 
 
             if (!data || data.length < minDataLen) continue;
 

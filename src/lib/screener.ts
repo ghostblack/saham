@@ -6,19 +6,31 @@ const yahooFinance = new YahooFinance();
  * Fetches historical data for a given ticker.
  * IDX stocks should have the suffix .JK
  */
-export async function getHistoricalData(ticker: string, period1: Date, period2: Date, interval: '1d' | '1wk' | '1mo' = '1d') {
-    try {
-        const symbol = ticker.endsWith('.JK') ? ticker : `${ticker}.JK`;
-        const results = await yahooFinance.historical(symbol, {
-            period1,
-            period2,
-            interval,
-        });
-        return results;
-    } catch (error) {
-        console.error(`Error fetching data for ${ticker}:`, error);
-        return null;
+export async function getHistoricalData(ticker: string, period1: Date, period2: Date, interval: '1d' | '1wk' | '1mo' = '1d', retries = 2) {
+    const symbol = ticker.endsWith('.JK') ? ticker : `${ticker}.JK`;
+    for (let i = 0; i <= retries; i++) {
+        try {
+            const results = await yahooFinance.historical(symbol, {
+                period1,
+                period2,
+                interval,
+            });
+            return results;
+        } catch (error: any) {
+            const isDataError = error.message?.includes('null values');
+            if (i === retries) {
+                // On last attempt, log error but return null to let the script continue
+                console.error(`Final failure for ${ticker}: ${error.message}`);
+                return null;
+            }
+            
+            // Wait longer if it's a data validation error (waiting for Yahoo to update its internal cache)
+            const waitTime = isDataError ? 3000 * (i + 1) : 2000 * (i + 1);
+            console.warn(`Retry ${i + 1}/${retries} for ${ticker} in ${waitTime}ms...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
     }
+    return null;
 }
 
 /**
