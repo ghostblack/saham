@@ -54,31 +54,47 @@ export function validateSmaCriteria(
     smas: Record<number, number | null>,
     periods: number[]
 ) {
-    // Core periods for "Diatas Awan": 10, 20, 50, 100
+    // Core periods: 10, 20, 50, 100
     const corePeriods = [10, 20, 50, 100];
     const coreSmas = corePeriods.map(p => smas[p]).filter((v): v is number => v !== null);
 
     if (coreSmas.length !== corePeriods.length) return null;
 
-    // 1. Price above core MAs (10, 20, 50, 100)
+    // 1. MUST be above MA10, MA20, MA50, MA100
     const isAboveAllCore = coreSmas.every(sma => currentPrice > sma);
     if (!isAboveAllCore) return null;
 
-    // 2. MAs are tight (Max MA - Min MA) / Price
+    // 2. Max distance from the nearest MA (usually the highest one) must be <= 5%
+    const highestMA = Math.max(...coreSmas);
+    const distance = (currentPrice - highestMA) / highestMA;
+    if (distance > 0.05) return null;
+
+    // 3. Signal Classification
+    const ma5 = smas[5];
+    const ma10 = smas[10];
+    const ma20 = smas[20];
+    
+    let status = 'Pantauan'; // Default: Price is above MA10/20/50/100 (isAboveAllCore) but tier is determined below
+    let tightStatus = 'Rapat';
+
+    if (ma5 !== null && currentPrice > ma5) {
+        status = 'Rekom Beli';
+        tightStatus = 'Super Rapat';
+    } else if (ma10 !== null && currentPrice > ma10) {
+        status = 'Mulai Beli';
+        tightStatus = 'Rapat';
+    } else if (ma20 !== null && currentPrice > ma20) {
+        status = 'Pantauan';
+        tightStatus = 'Rapat';
+    }
+
     const maxSma = Math.max(...coreSmas);
     const minSma = Math.min(...coreSmas);
     const tightness = (maxSma - minSma) / currentPrice;
 
-    // 3. Price distance to nearest MA (highest core MA) must be <= 5%
-    const distance = (currentPrice - maxSma) / maxSma;
-    if (distance > 0.05) return null;
-
-    const ma5 = smas[5];
-    const isSuperKetat = (ma5 !== undefined && ma5 !== null) && (currentPrice > ma5);
-    const status = isSuperKetat ? 'Super Ketat' : 'Ketat';
-
     return {
         status,
+        tightStatus, // e.g., Rapat or Super Rapat
         tightness,
         distance,
         smaValues: periods.reduce((acc, p) => ({ ...acc, [p]: smas[p] }), {})
@@ -116,6 +132,7 @@ export function checkCariBottom(
     closes: number[],
     opens: number[],
     lows: number[],
+    volumes: number[],
     sma10: (number | null)[],
     sma20: (number | null)[],
     sma50: (number | null)[],
@@ -123,7 +140,7 @@ export function checkCariBottom(
     macdLine: (number | null)[],
     signalLine: (number | null)[]
 ): { isValid: boolean; gainPercentage?: number } {
-    if (closes.length < 60 || sma100.length < 60) return { isValid: false };
+    if (closes.length < 60 || sma100.length < 60 || volumes.length < 60) return { isValid: false };
 
     const len = closes.length;
     const latestClose = closes[len - 1];
@@ -132,9 +149,10 @@ export function checkCariBottom(
 
     if (latestMA20 === null || latestMA10 === null) return { isValid: false };
 
-    // 1. Cek apakah pernah "di bawah semua MA" dalam 40 hari terakhir (konteks bottoming)
-    let everBelowAllMA = false;
-    for (let i = len - 60; i < len - 10; i++) {
+    // 1. MUST have been in a "Real Downtrend" 20-10 days ago
+    // (Price < MA10, MA20, MA50, MA100)
+    let confirmedDowntrendHistory = false;
+    for (let i = len - 25; i < len - 10; i++) {
         const c = closes[i];
         const m10 = sma10[i];
         const m20 = sma20[i];
@@ -143,16 +161,16 @@ export function checkCariBottom(
         
         if (m10 !== null && m20 !== null && m50 !== null && m100 !== null) {
             if (c < m10 && c < m20 && c < m50 && c < m100) {
-                everBelowAllMA = true;
+                confirmedDowntrendHistory = true;
                 break;
             }
         }
     }
-    if (!everBelowAllMA) return { isValid: false };
+    if (!confirmedDowntrendHistory) return { isValid: false };
 
-    // 2. Cek crossover MA 10 (Orange) di atas MA 20 (Hijau) dalam 20 hari terakhir
-    let crossFoundIndex = -1;
-    for (let i = len - 1; i >= len - 20; i--) {
+    // 2. Find the FIRST Golden Cross (MA10 > MA20) in the last 5 days
+    let crossIndex = -1;
+    for (let i = len - 5; i < len; i++) {
         const curr10 = sma10[i];
         const prev10 = sma10[i - 1];
         const curr20 = sma20[i];
@@ -160,28 +178,120 @@ export function checkCariBottom(
 
         if (curr10 !== null && prev10 !== null && curr20 !== null && prev20 !== null) {
             if (curr10 > curr20 && prev10 <= prev20) {
-                crossFoundIndex = i;
+                crossIndex = i;
                 break;
             }
         }
     }
-    if (crossFoundIndex === -1) return { isValid: false };
+    if (crossIndex === -1) return { isValid: false };
 
-    // 3. Syarat "ANTRI" atau "MANTUL":
-    // Harga sekarang harus di atas MA 20
-    if (latestClose < latestMA20) return { isValid: false };
+    // 3. Survival & Persistence Check:
+    // Price must have survived 1 to 3 days above MA20 since the cross
+    const daysSinceCross = (len - 1) - crossIndex;
+    if (daysSinceCross < 1 || daysSinceCross > 3) return { isValid: false };
 
-    // Jarak harga sekarang ke MA 20 tidak boleh lebih dari 3% (area pantulan)
-    const distanceToMA20 = (latestClose - latestMA20) / latestMA20;
-    if (distanceToMA20 > 0.03) return { isValid: false };
+    // All days since cross must remain above MA20
+    for (let i = crossIndex; i < len; i++) {
+        const c = closes[i];
+        const m20 = sma20[i];
+        if (m20 === null || c < m20) return { isValid: false };
+    }
 
-    // Tambahan: MA 10 harus tetap di atas MA 20
-    if (latestMA10 <= latestMA20) return { isValid: false };
+    // 4. No New Low: Low after cross must be >= Low on cross day
+    const crossLow = lows[crossIndex];
+    for (let i = crossIndex + 1; i < len; i++) {
+        if (lows[i] < crossLow) return { isValid: false };
+    }
 
-    const crossPrice = closes[crossFoundIndex];
-    const gainPercentage = ((latestClose - crossPrice) / crossPrice) * 100;
+    // 5. Volume Confirmation: "tiba tiba ada volume lebih besar"
+    // Ratio > 1.5x average on cross day OR current day
+    const calculateAvgVolume = (index: number) => {
+        const period = 20;
+        const prevVols = volumes.slice(Math.max(0, index - period), index);
+        if (prevVols.length === 0) return 0;
+        return prevVols.reduce((a, b) => a + b, 0) / prevVols.length;
+    };
 
-    return { isValid: true, gainPercentage };
+    const crossAvg = calculateAvgVolume(crossIndex);
+    const currAvg = calculateAvgVolume(len - 1);
+    const crossVolRatio = crossAvg > 0 ? volumes[crossIndex] / crossAvg : 1;
+    const currVolRatio = currAvg > 0 ? volumes[len - 1] / currAvg : 1;
+
+    if (crossVolRatio < 1.5 && currVolRatio < 1.5) return { isValid: false };
+
+    // 6. GAIN CAP: Gain from cross price must not exceed 5%
+    const crossPrice = closes[crossIndex];
+    const gainFromCross = ((latestClose - crossPrice) / crossPrice) * 100;
+    if (gainFromCross > 5) return { isValid: false };
+
+    return { isValid: true, gainPercentage: gainFromCross };
+}
+
+/**
+ * Bottom Break Sideways:
+ * 1. Sideways for 30+ days (price range < 12%)
+ * 2. Breakout above the sideways range & MA20 in the last 1-3 days
+ * 3. Volume spike (>1.8x average) on breakout
+ */
+export function checkBottomBreakSideways(
+    closes: number[],
+    lows: number[],
+    highs: number[],
+    volumes: number[],
+    sma20: (number | null)[]
+): { isValid: boolean; gainPercentage?: number } {
+    if (closes.length < 40 || sma20.length < 40) return { isValid: false };
+
+    const len = closes.length;
+    const latestClose = closes[len - 1];
+    
+    // 1. Sideways Check (33 to 3 days ago, ~30 days)
+    const windowStart = len - 33;
+    const windowEnd = len - 3;
+    if (windowStart < 0) return { isValid: false };
+
+    const windowHighs = highs.slice(windowStart, windowEnd);
+    const windowLows = lows.slice(windowStart, windowEnd);
+    
+    const maxH = Math.max(...windowHighs);
+    const minL = Math.min(...windowLows);
+    const priceRange = (maxH - minL) / minL;
+
+    // Must be sideways (range <= 12%)
+    if (priceRange > 0.12) return { isValid: false };
+
+    // 2. Breakout Check (last 1-3 days)
+    let breakoutFound = false;
+    for (let i = len - 3; i < len; i++) {
+        const valMA20 = sma20[i];
+        if (closes[i] > maxH && valMA20 !== null && closes[i] > valMA20) {
+            breakoutFound = true;
+            break;
+        }
+    }
+    if (!breakoutFound) return { isValid: false };
+
+    // 3. Volume Confirmation
+    const calculateAvgVolume = (index: number) => {
+        const period = 20;
+        const prevVols = volumes.slice(Math.max(0, index - period), index);
+        return prevVols.length > 0 ? prevVols.reduce((a, b) => a + b, 0) / prevVols.length : 0;
+    };
+
+    let volumeConfirmed = false;
+    for (let i = len - 3; i < len; i++) {
+        const avg = calculateAvgVolume(i);
+        if (avg > 0 && volumes[i] / avg >= 1.8) {
+            volumeConfirmed = true;
+            break;
+        }
+    }
+    if (!volumeConfirmed) return { isValid: false };
+
+    const gainFromBreak = ((latestClose - maxH) / maxH) * 100;
+    if (gainFromBreak > 10) return { isValid: false };
+
+    return { isValid: true, gainPercentage: gainFromBreak };
 }
 
 /**

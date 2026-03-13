@@ -27,7 +27,8 @@ import { AdminPanel } from '@/components/AdminPanel';
 import { WatchlistPanel } from '@/components/WatchlistPanel';
 import { TradeAnalysis } from '@/components/TradeAnalysis';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Sparkles, Brain } from 'lucide-react';
+import { AIAnalyst } from '@/components/AIAnalyst';
 
 interface StockResult {
   ticker: string;
@@ -119,6 +120,7 @@ export default function Dashboard() {
   const [riskPercent, setRiskPercent] = useState<number>(2); 
   const [selectedStockForAnalysis, setSelectedStockForAnalysis] = useState<StockResult | null>(null);
   const [tradePlan, setTradePlan] = useState<any>(null);
+  const [showAIAnalyst, setShowAIAnalyst] = useState(false);
 
   // Utility functions
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -407,6 +409,15 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => setShowAIAnalyst(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 border border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary font-black text-[10px] uppercase tracking-widest transition-all group"
+                  >
+                    <Sparkles className="h-3 w-3 animate-pulse group-hover:scale-110 transition-transform" />
+                    AI Analyst
+                  </button>
+                </div>
               </div>
 
               <ResultGrid 
@@ -447,6 +458,14 @@ export default function Dashboard() {
           )}
         </div>
       </main>
+
+      {showAIAnalyst && (
+        <AIAnalyst 
+          results={results} 
+          activeTab={activeTab} 
+          onClose={() => setShowAIAnalyst(false)} 
+        />
+      )}
     </div>
   );
 }

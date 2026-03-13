@@ -150,7 +150,8 @@ export function ResultTable({
               >
                 <div className="flex items-center justify-between px-2">Vol Ratio <SortIcon column="volumeRatio" /></div>
               </TableHead>
-              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">Technical</TableHead>
+              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">Signal</TableHead>
+              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">Structure</TableHead>
               <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 text-right px-4">Ops</TableHead>
             </TableRow>
           </TableHeader>
@@ -177,8 +178,8 @@ export function ResultTable({
                         className="font-black text-foreground tracking-tighter text-[13px] hover:text-primary transition-colors hover:underline"
                       >
                         {stock.ticker}
-                      </Link>
-                      {stock.isRocket && <Rocket size={10} className="text-primary animate-pulse shrink-0" />}
+                       </Link>
+                       {stock.isRocket && <Rocket size={10} className="text-primary animate-pulse shrink-0" />}
                     </div>
                   </TableCell>
                   <TableCell className="py-2 px-4 border-r border-border/40">
@@ -206,17 +207,48 @@ export function ResultTable({
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="py-2 px-4 border-r border-border/40 min-w-[120px]">
+                  <TableCell className="py-2 px-4 border-r border-border/40 min-w-[110px]">
+                    {(() => {
+                        let displayStatus = stock.status;
+                        if (displayStatus === 'Super Ketat') displayStatus = 'Rekom Beli';
+                        if (displayStatus === 'Ketat') displayStatus = 'Mulai Beli';
+                        
+                        if (!displayStatus) return "-";
+
+                        return (
+                            <div className={cn(
+                              "text-[9px] font-black px-1.5 py-1 border uppercase tracking-tighter text-center",
+                              displayStatus === 'Rekom Beli' ? "border-emerald-500 text-emerald-500 bg-emerald-500/5" :
+                              displayStatus === 'Mulai Beli' ? "border-primary text-primary bg-primary/5" :
+                              "border-border text-muted-foreground bg-muted/5"
+                            )}>
+                              {displayStatus}
+                            </div>
+                        );
+                    })()}
+                  </TableCell>
+                  <TableCell className="py-2 px-4 border-r border-border/40 min-w-[110px]">
                     <div className="flex flex-wrap items-center gap-2">
-                      {isAboveMA20 ? (
-                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-tighter">MA20 ↑</span>
-                      ) : ma20 ? (
-                        <span className="text-[9px] font-black text-amber-600 uppercase tracking-tighter">MA20 ↓</span>
-                      ) : null}
-                      
-                      {isAboveMA200 && (
-                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-tighter">MA200 ↑</span>
-                      )}
+                       {(() => {
+                         let tStatus = stock.tightStatus;
+                         // Fallback for old data
+                         if (!tStatus && stock.status === 'Super Ketat') tStatus = 'Super Rapat';
+                         if (!tStatus && stock.status === 'Ketat') tStatus = 'Rapat';
+                         
+                         if (!tStatus) return null;
+
+                         return (
+                           <span className={cn(
+                             "text-[8px] font-black uppercase tracking-widest",
+                             tStatus === 'Super Rapat' ? "text-primary" : "text-muted-foreground opacity-60"
+                           )}>
+                              {tStatus}
+                           </span>
+                         );
+                       })()}
+                       {isAboveMA200 && (
+                         <span className="text-[8px] font-black text-blue-600/60 uppercase tracking-tighter border-l border-border/20 pl-2">MA200 ↑</span>
+                       )}
                     </div>
                   </TableCell>
                   <TableCell className="text-right px-4 py-2">

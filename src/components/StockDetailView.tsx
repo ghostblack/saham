@@ -82,26 +82,36 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
         x: d.x,
         y: stock.smaFullData?.['20']?.[i] || null
       }))
+    },
+    {
+      name: 'MA50',
+      type: 'line',
+      data: (stock.ohlcData || []).map((d, i) => ({
+        x: d.x,
+        y: stock.smaFullData?.['50']?.[i] || null
+      }))
     }
   ];
 
   const finalOptions = {
     ...chartOptions,
     stroke: {
-      width: [1, 1, 1],
-      colors: ['#000', '#f97316', '#10b981']
+      width: [1, 1.5, 1.5, 1.5],
+      colors: ['#000', '#f97316', '#10b981', '#3b82f6']
     }
   };
 
   const smas = [
     { name: 'MA 10', value: stock.smaValues?.['10'] || 0, color: 'text-orange-500' },
     { name: 'MA 20', value: stock.smaValues?.['20'] || 0, color: 'text-emerald-500' },
-    { name: 'MA 50', value: stock.smaValues?.['50'] || 0, color: 'text-amber-500' },
-    { name: 'MA 100', value: stock.smaValues?.['100'] || 0, color: 'text-rose-500' }
-  ].filter(s => s.value > 0).sort((a, b) => b.value - a.value);
+    { name: 'MA 50', value: stock.smaValues?.['50'] || 0, color: 'text-blue-500' },
+    { name: 'MA 100', value: stock.smaValues?.['100'] || 0, color: 'text-amber-500' }
+  ].filter(s => s.value > 0);
 
-  const entry1 = stock.isRocket ? 'HAKA (Market Buy)' : `Antri di ${smas[0]?.name || 'Support'} (~${Math.floor(smas[0]?.value || stock.price)})`;
-  const entry2 = `Antri di ${smas[1]?.name || 'Support'} (~${Math.floor(smas[1]?.value || stock.price * 0.97)})`;
+  // Phased Buying (Cicil Beli) Logic
+  const entryPrice = stock.price;
+  const support1 = Math.floor(stock.smaValues?.['10'] || entryPrice * 0.98);
+  const support2 = Math.floor(stock.smaValues?.['20'] || entryPrice * 0.96);
 
   return (
     <div className="h-full w-full grid grid-cols-12 grid-rows-6 border-l border-border bg-background font-mono leading-none">
@@ -112,19 +122,27 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
           <StockLogo ticker={stock.ticker} size="md" />
           <div className="flex flex-col">
             <span className="text-[18px] font-black tracking-tighter text-foreground leading-none">{stock.ticker}</span>
-            {stock.isRocket && <div className="flex items-center gap-1 mt-1"><Zap size={10} className="text-primary fill-primary" /><span className="text-[7px] font-black uppercase text-primary tracking-widest">Rocket Signal</span></div>}
+            <div className="flex items-center gap-1 mt-1">
+                {stock.isRocket ? <Zap size={10} className="text-primary fill-primary" /> : <Activity size={10} className="text-muted-foreground" />}
+                <span className={cn(
+                    "text-[7px] font-black uppercase tracking-widest",
+                    stock.isRocket ? "text-primary" : "text-muted-foreground opacity-60"
+                )}>
+                    {stock.isRocket ? "Rocket Signal" : "Stable Trend"}
+                </span>
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 mt-1">
           <div className="text-[9px] font-black px-1.5 py-0.5 border border-primary text-primary uppercase tracking-widest tabular-nums">
             {stock.price.toLocaleString('id-ID')}
           </div>
-          {stock.macdStatus && (
+          {stock.status && (
             <div className={cn(
               "text-[8px] font-black px-1.5 py-0.5 border uppercase tracking-widest",
-              stock.macdStatus.includes('Golden') ? "border-emerald-500 text-emerald-500" : "border-border text-muted-foreground"
+              stock.status.includes('Beli') ? "border-emerald-500 text-emerald-500" : "border-border text-muted-foreground"
             )}>
-              {stock.macdStatus}
+              {stock.status}
             </div>
           )}
         </div>
@@ -133,7 +151,7 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
       {/* 2. MAIN TECHNICALS (Top Center) */}
       <div className="col-span-6 row-span-1 border-r border-b border-border p-4 flex items-center justify-around">
         <div className="text-center">
-          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">Vol Ratio</div>
+          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">Vol (10D Avg)</div>
           <div className="text-[18px] font-black tabular-nums text-foreground">{(stock.volumeRatio || 0).toFixed(2)}x</div>
         </div>
         <div className="h-8 w-px bg-border/40"></div>
@@ -143,7 +161,7 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
         </div>
         <div className="h-8 w-px bg-border/40"></div>
         <div className="text-center">
-          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">MA Dist</div>
+          <div className="text-[8px] font-black uppercase text-muted-foreground tracking-[0.2em] mb-1">MA Break</div>
           <div className="text-[18px] font-black tabular-nums text-primary">+{((stock.distance || 0) * 100).toFixed(1)}%</div>
         </div>
       </div>
@@ -156,7 +174,7 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
       {/* 4. MAIN CHART (Center Left) */}
       <div className="col-span-9 row-span-4 border-r border-b border-border bg-black/5 relative min-h-0">
         <div className="absolute top-2 left-4 z-10 flex gap-4">
-            {smas.slice(0, 2).map(sma => (
+            {smas.slice(0, 3).map(sma => (
                 <div key={sma.name} className="flex items-center gap-1.5">
                     <div className={cn("w-1.5 h-1.5 rounded-full", sma.color.replace('text', 'bg'))}></div>
                     <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground">{sma.name}: {Math.floor(sma.value)}</span>
@@ -168,33 +186,46 @@ export default function StockDetailView({ stock }: StockDetailViewProps) {
         </div>
       </div>
 
-      {/* 5. TRADE PLAN (Center Right) */}
-      <div className="col-span-3 row-span-4 border-b border-border p-5 flex flex-col gap-4">
-         <div className="flex items-center gap-2 mb-2">
+      {/* 5. CICIL BELI PLAN (Center Right) */}
+      <div className="col-span-3 row-span-4 border-b border-border p-4 flex flex-col gap-4">
+         <div className="flex items-center gap-2 mb-1">
             <Target size={12} className="text-primary" />
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-foreground">Entry Matrix</span>
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-foreground">Cicil Beli Strategy</span>
          </div>
          
-         <div className="space-y-3">
-             <div className="p-3 border border-primary/20 bg-primary/5">
-                <div className="text-[7px] font-black text-primary uppercase tracking-[0.2em] mb-1">PRIMARY LOAD :: 60%</div>
-                <div className="text-[11px] font-black text-foreground uppercase tracking-tight leading-tight">{entry1}</div>
+         <div className="flex-1 flex flex-col gap-2.5">
+             <div className="flex-1 p-3 border border-primary/20 bg-primary/5 flex flex-col justify-center">
+                <div className="flex justify-between items-center mb-1">
+                    <span className="text-[7px] font-black text-primary uppercase tracking-widest">Initial :: 30%</span>
+                    <span className="text-[9px] font-black text-foreground">Rp {entryPrice.toLocaleString()}</span>
+                </div>
+                <div className="text-[10px] font-black text-foreground uppercase tracking-tight leading-none italic">Market Price / HAKA</div>
              </div>
              
-             <div className="p-3 border border-border bg-muted/5">
-                <div className="text-[7px] font-black text-muted-foreground uppercase tracking-[0.2em] mb-1">SECONDARY :: 40%</div>
-                <div className="text-[11px] font-black text-foreground uppercase tracking-tight leading-tight">{entry2}</div>
+             <div className="flex-1 p-3 border border-border bg-muted/5 flex flex-col justify-center">
+                <div className="flex justify-between items-center mb-1">
+                    <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest">Support I :: 40%</span>
+                    <span className="text-[9px] font-black text-foreground">Rp {support1.toLocaleString()}</span>
+                </div>
+                <div className="text-[10px] font-black text-foreground uppercase tracking-tight leading-none italic">Near MA 10 Zone</div>
+             </div>
+
+             <div className="flex-1 p-3 border border-border bg-muted/5 flex flex-col justify-center">
+                <div className="flex justify-between items-center mb-1">
+                    <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest">Support II :: 30%</span>
+                    <span className="text-[9px] font-black text-foreground">Rp {support2.toLocaleString()}</span>
+                </div>
+                <div className="text-[10px] font-black text-foreground uppercase tracking-tight leading-none italic">Safety MA 20 Zone</div>
              </div>
          </div>
 
-         {stock.isRocket && (
-            <div className="mt-auto p-3 border border-amber-500/20 bg-amber-500/5 flex items-start gap-2">
-               <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
-               <p className="text-[8px] font-black text-amber-900/60 uppercase leading-relaxed tracking-tighter">
-                  Aggressive accumulation detected. Market buy recommended for primary load.
-               </p>
+         <div className="p-3 border border-rose-500/20 bg-rose-500/5 items-start gap-2">
+            <Shield size={10} className="text-rose-500 mb-1" />
+            <div className="flex justify-between items-center">
+                <span className="text-[7px] font-black text-rose-500 uppercase tracking-widest">Stop Loss</span>
+                <span className="text-[9px] font-black text-rose-600">Rp {Math.floor(support2 * 0.98).toLocaleString()}</span>
             </div>
-         )}
+         </div>
       </div>
 
       {/* 6. MA TABLE (Bottom Left) */}

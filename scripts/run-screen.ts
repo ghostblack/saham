@@ -2,14 +2,17 @@ import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../src/lib/firebase';
 import { IDX_TICKERS } from '../src/lib/tickers';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkCariBottom } from '../src/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkCariBottom, checkBottomBreakSideways } from '../src/lib/screener';
 import { calculateMultipleSMAs, calculateMACD } from '../src/lib/indicators';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance();
 
 // Delay helper
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function processAllTickers(tickers: typeof IDX_TICKERS) {
-    console.log(`\n--- Starting Optimized Single-Pass Screening ---`);
+    console.log(`\n--- [${new Date().toLocaleTimeString()}] Starting Optimized Screening ---`);
     const resultsAwan: any[] = [];
     const resultsBottom: any[] = [];
     const resultsTurnaround: any[] = [];
@@ -21,17 +24,53 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
     const periodMonthly1 = new Date();
     periodMonthly1.setFullYear(period2.getFullYear() - 3);
 
-    const CHUNK_SIZE = 5;
-    for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
-        const chunk = tickers.slice(i, i + CHUNK_SIZE);
+    // --- PHASE 1: SMART PRE-FILTER (Bulk Quotes) ---
+    console.log(`Phase 1: Pre-filtering ${tickers.length} tickers for liquidity...`);
+    const liquidTickers: string[] = [];
+    const CHUNK_SIZE_QUOTE = 100;
+    
+    for (let i = 0; i < tickers.length; i += CHUNK_SIZE_QUOTE) {
+        const chunk = tickers.slice(i, i + CHUNK_SIZE_QUOTE);
+        const symbols = chunk.map(t => `${t}.JK`);
+        try {
+            const quotes = await yahooFinance.quote(symbols);
+            quotes.forEach((q: any) => {
+                const ticker = q.symbol.split('.')[0];
+                const price = q.regularMarketPrice;
+                const volume = q.regularMarketVolume;
+                const avgVolume = q.averageDailyVolume3Month;
+                const value = price * volume;
+
+                // Stricter Filter for Liquidity:
+                // 1. Price > 100 (Exclude laggards/thin penny stocks)
+                // 2. Value > 500M (Ensures enough money flowing)
+                // 3. Avg Volume > 200k (Ensures consistent historical liquidity)
+                if (price > 100 && value > 500000000 && (volume > 100000 || avgVolume > 200000)) {
+                    liquidTickers.push(ticker);
+                }
+            });
+        } catch (e) {
+            console.warn(`Warning: Batch quote failed for chunk starting at index ${i}. Skipping pre-filter for these.`);
+            // Fallback: keep all tickers in this chunk if batch fails
+            liquidTickers.push(...chunk);
+        }
+    }
+    console.log(`Pre-filter complete. ${liquidTickers.length}/${tickers.length} tickers passed to Phase 2.`);
+
+    // --- PHASE 2: DETAILED SCREENING ---
+    const CHUNK_SIZE = 3; // Reduced concurrency for stability
+    for (let i = 0; i < liquidTickers.length; i += CHUNK_SIZE) {
+        const chunk = liquidTickers.slice(i, i + CHUNK_SIZE);
         
-        if (i % 50 === 0 && i !== 0) {
-            console.log(`Progress: ${i}/${tickers.length} tickers processed...`);
+        if (i % 30 === 0 && i !== 0) {
+            console.log(`Progress: ${i}/${liquidTickers.length} processed...`);
         }
 
         await Promise.all(chunk.map(async (ticker) => {
             try {
-                // Fetch Daily and Monthly data in parallel for this ticker
+                // Stochastic delay to avoid robotic patterns
+                await sleep(Math.random() * 500);
+
                 const [dailyData, monthlyData] = await Promise.all([
                     getHistoricalData(ticker, periodDaily1, period2, '1d'),
                     getHistoricalData(ticker, periodMonthly1, period2, '1mo')
@@ -45,6 +84,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const volumes = validDaily.map(d => d.volume || 0);
                         const opens = validDaily.map(d => d.open);
                         const lows = validDaily.map(d => d.low);
+                        const highs = validDaily.map(d => d.high);
                         const currentPrice = closes[closes.length - 1];
                         const currentVolume = volumes[volumes.length - 1];
                         const currentOpen = opens[opens.length - 1];
@@ -59,7 +99,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                             smaPeriods.forEach(p => { latestSmas[p] = smaData[p][smaData[p].length - 1]; });
 
                             const validation = validateSmaCriteria(currentPrice, latestSmas, smaPeriods);
-                            const volumeInfo = checkVolumeSpike(volumes);
+                            const volumeInfo = checkVolumeSpike(volumes, 10);
 
                             if (validation) {
                                 const mLine = macdData.macdLine;
@@ -94,7 +134,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const macdDataBottom = calculateMACD(closes);
                         const volumeInfoBottom = checkVolumeSpike(volumes);
                         const bottomResult = checkCariBottom(
-                            closes, opens, lows,
+                            closes, opens, lows, volumes,
                             smaDataBottom[10], smaDataBottom[20], smaDataBottom[50], smaDataBottom[100],
                             macdDataBottom.macdLine, macdDataBottom.signalLine
                         );
@@ -109,6 +149,24 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                                 sparkline: closes.slice(-40)
                             });
                             console.log(`[BOTTOM] FOUND: ${ticker}`);
+                        }
+
+                        // Check Bottom Break Sideways
+                        const sidewaysResult = checkBottomBreakSideways(
+                            closes, lows, highs, volumes, smaDataBottom[20]
+                        );
+                        if (sidewaysResult.isValid) {
+                            resultsBottom.push({
+                                ticker, price: currentPrice, volume: currentVolume,
+                                volumeRatio: volumeInfoBottom.ratio, isVolumeSpike: volumeInfoBottom.isSpike,
+                                gainFromBreak: sidewaysResult.gainPercentage,
+                                isSidewaysBreak: true,
+                                smaValues: { '20': smaDataBottom[20][smaDataBottom[20].length - 1] },
+                                smaFullData: { 10: smaDataBottom[10].slice(-40), 20: smaDataBottom[20].slice(-40), 50: smaDataBottom[50].slice(-40), 100: smaDataBottom[100].slice(-40) },
+                                ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
+                                sparkline: closes.slice(-40)
+                            });
+                            console.log(`[SIDEWAYS] FOUND: ${ticker}`);
                         }
                     }
                 }
@@ -139,21 +197,17 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                                 ticker, price: mCloses[mCloses.length - 1], volume: mVolumes[mVolumes.length - 1],
                                 isVolumeSpike: volumeInfoT.isSpike, volumeRatio: volumeInfoT.ratio, smaValues: {},
                                 gainFromCross,
-                                sparkline: mCloses.slice(-40)
+                                ohlcData: validMonthly.slice(-12).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
+                                sparkline: mCloses.slice(-12)
                             });
                             console.log(`[TURNAROUND] FOUND: ${ticker}`);
                         }
                     }
                 }
-            } catch (e) {
-                console.error(`Error processing ${ticker}:`, e);
+            } catch (e: any) {
+                console.error(`Error processing ${ticker}:`, e.message);
             }
         }));
-
-        // Delay after each batch for rate limiting
-        const baseDelay = 1200; // Slightly faster delay since we are doing more work per batch but fewer batches total
-        const jitter = Math.random() * 300;
-        await sleep(baseDelay + jitter); 
     }
 
     return {
@@ -164,28 +218,13 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
 }
 
 async function main() {
-    process.on('uncaughtException', (err) => {
-        console.error('UNCAUGHT EXCEPTION:', err);
-        process.exit(1);
-    });
-
-    process.on('unhandledRejection', (reason, promise) => {
-        console.error('UNHANDLED REJECTION at:', promise, 'reason:', reason);
-        process.exit(1);
-    });
-
-    const adminEmail = process.env.ADMIN_EMAIL;
+    const email = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
 
-    console.log('--- Optimized Screening Script Started ---');
-    
-    if (!adminEmail || !adminPassword) {
-        console.error("FATAL: ADMIN_EMAIL/PASSWORD not set.");
+    if (!email || !adminPassword) {
+        console.error("Missing ADMIN_EMAIL or ADMIN_PASSWORD ENV.");
         process.exit(1);
     }
-
-    let email = adminEmail.trim();
-    if (!email.includes('@')) email = `${email}@nexus.stock`;
 
     try {
         console.log(`Authenticating with Firebase as ${email}...`);
@@ -195,7 +234,7 @@ async function main() {
         const IS_TEST = process.env.IS_TEST === 'true';
         const tickersToRun = IS_TEST ? IDX_TICKERS.slice(0, 10) : IDX_TICKERS;
 
-        console.log(`Starting optimized single-pass job for ${tickersToRun.length} tickers...`);
+        console.log(`Starting optimized screening job for ${tickersToRun.length} tickers...`);
 
         const allResults = await processAllTickers(tickersToRun);
 
