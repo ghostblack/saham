@@ -171,17 +171,61 @@ async function runStrategy(strategy: 'diatas_awan' | 'cari_bottom' | 'turnaround
 }
 
 async function main() {
+    process.on('uncaughtException', (err) => {
+        console.error('UNCAUGHT EXCEPTION:', err);
+        process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('UNHANDLED REJECTION at:', promise, 'reason:', reason);
+        process.exit(1);
+    });
+
     const adminEmail = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
 
-    if (!adminEmail || !adminPassword) {
-        console.error("FATAL: ADMIN_EMAIL or ADMIN_PASSWORD not set in environment.");
+    console.log('--- Script Execution Started ---');
+    console.log(`Node version: ${process.version}`);
+    console.log(`Working directory: ${process.cwd()}`);
+    
+    try {
+        const dummy = require('yahoo-finance2');
+        console.log('Dependencies loaded successfully.');
+    } catch (e) {
+        console.error('Failed to load dependencies. Did you run npm install?');
+    }
+
+    if (!adminEmail) {
+        console.error("FATAL: ADMIN_EMAIL is not set in environment repository secrets.");
+        process.exit(1);
+    }
+    if (!adminPassword) {
+        console.error("FATAL: ADMIN_PASSWORD is not set in environment repository secrets.");
+        process.exit(1);
+    }
+
+    console.log("Credentials detected in environment.");
+
+    let email = adminEmail.trim();
+    if (!email) {
+        console.error("FATAL: ADMIN_EMAIL is empty after trimming.");
+        process.exit(1);
+    }
+
+    if (!email.includes('@')) {
+        email = `${email}@nexus.stock`;
+    }
+
+    // Basic regex check to prevent Firebase 'auth/invalid-email'
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        console.error(`FATAL: Formatted email "${email}" is still invalid format.`);
         process.exit(1);
     }
 
     try {
-        console.log('Authenticating with Firebase...');
-        await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+        console.log(`Authenticating with Firebase as ${email}...`);
+        await signInWithEmailAndPassword(auth, email, adminPassword);
         console.log('Authenticated successfully.');
 
         // Take a small subset if testing
@@ -196,10 +240,16 @@ async function main() {
 
         console.log('\nAll screening jobs completed successfully!');
         process.exit(0);
-    } catch (e) {
+    } catch (e: any) {
         console.error("FATAL ERROR in main loop:", e);
+        if (e.code === 'auth/invalid-credential' || e.code === 'auth/user-not-found') {
+            console.error("Check if ADMIN_EMAIL and ADMIN_PASSWORD are correct in GitHub Secrets.");
+        }
         process.exit(1);
     }
 }
 
-main();
+main().catch(err => {
+    console.error("Top-level main() failed:", err);
+    process.exit(1);
+});

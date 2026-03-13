@@ -1,5 +1,27 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## GitHub Automation Setup
+
+This project uses GitHub Actions to periodically screen stocks and cache the results to Firestore. This ensures the website remains fast and avoids API rate limits.
+
+### Prerequisites
+
+You must set the following **Secrets** in your GitHub Repository settings:
+1. Go to your repository on GitHub.
+2. Navigate to **Settings** > **Secrets and variables** > **Actions**.
+3. Click **New repository secret** and add:
+   - `ADMIN_EMAIL`: Your admin username (e.g., `admin`). The script will automatically append `@nexus.stock`.
+   - `ADMIN_PASSWORD`: Your admin password.
+
+### Manual Trigger
+
+You can manually trigger the screening job:
+1. Go to the **Actions** tab.
+2. Select **Automated Stock Screening**.
+3. Click **Run workflow** > **Run workflow**.
+
+---
+
 ## Getting Started
 
 First, run the development server:
