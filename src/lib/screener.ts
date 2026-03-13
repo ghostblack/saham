@@ -134,6 +134,7 @@ export function checkCariBottom(
     lows: number[],
     volumes: number[],
     rsi: (number | null)[],
+    sma5: (number | null)[],
     sma10: (number | null)[],
     sma20: (number | null)[],
     sma50: (number | null)[],
@@ -141,7 +142,7 @@ export function checkCariBottom(
     macdLine: (number | null)[],
     signalLine: (number | null)[]
 ): { isValid: boolean; gainPercentage?: number } {
-    if (closes.length < 60 || sma100.length < 60 || volumes.length < 60 || rsi.length < 60) return { isValid: false };
+    if (closes.length < 60 || sma100.length < 60 || volumes.length < 60 || rsi.length < 60 || sma5.length < 60) return { isValid: false };
 
     const len = closes.length;
     const latestClose = closes[len - 1];
@@ -160,13 +161,13 @@ export function checkCariBottom(
     let confirmedDowntrendHistory = false;
     for (let i = len - 25; i < len - 10; i++) {
         const c = closes[i];
+        const m5 = sma5[i];
         const m10 = sma10[i];
         const m20 = sma20[i];
         const m50 = sma50[i];
-        const m100 = sma100[i];
         
-        if (m10 !== null && m20 !== null && m50 !== null && m100 !== null) {
-            if (c < m10 && c < m20 && c < m50 && c < m100) {
+        if (m5 !== null && m10 !== null && m20 !== null && m50 !== null) {
+            if (c < m5 && c < m10 && c < m20 && c < m50) {
                 confirmedDowntrendHistory = true;
                 break;
             }

@@ -101,13 +101,13 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         }
 
                         // Check Cari Bottom
-                        const smaDataBottom = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
+                        const smaDataBottom = calculateMultipleSMAs(closes, [5, 10, 20, 50, 100, 200]);
                         const macdDataBottom = calculateMACD(closes);
                         const rsiDataBottom = calculateRSI(closes, 14);
                         const volumeInfoBottom = checkVolumeSpike(volumes);
                         const bottomResult = checkCariBottom(
                             closes, opens, lows, volumes, rsiDataBottom,
-                            smaDataBottom[10], smaDataBottom[20], smaDataBottom[50], smaDataBottom[100],
+                            smaDataBottom[5], smaDataBottom[10], smaDataBottom[20], smaDataBottom[50], smaDataBottom[100],
                             macdDataBottom.macdLine, macdDataBottom.signalLine
                         );
                         if (bottomResult.isValid) {
