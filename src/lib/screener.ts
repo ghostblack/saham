@@ -14,7 +14,7 @@ export async function getHistoricalData(ticker: string, period1: Date, period2: 
                 period1,
                 period2,
                 interval,
-            });
+            }, { validateResult: false });
             return results;
         } catch (error: any) {
             const isDataError = error.message?.includes('null values');
