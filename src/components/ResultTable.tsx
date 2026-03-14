@@ -151,7 +151,11 @@ export function ResultTable({
                 <div className="flex items-center justify-between px-2">Vol Ratio <SortIcon column="volumeRatio" /></div>
               </TableHead>
               <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">RSI</TableHead>
-              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">Target</TableHead>
+              {activeTab === 'screener_awan' ? (
+                <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">Signal</TableHead>
+              ) : (
+                <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">Target TP</TableHead>
+              )}
               <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 text-right px-4">Ops</TableHead>
             </TableRow>
           </TableHeader>
@@ -217,7 +221,30 @@ export function ResultTable({
                     </span>
                   </TableCell>
                   <TableCell className="py-2 px-4 border-r border-border/40 text-center">
-                    {stock.maTarget ? (
+                    {activeTab === 'screener_awan' ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="flex items-center gap-1">
+                          {stock.tier && (
+                            <span className={cn(
+                              "px-1 py-0.5 rounded-[4px] text-[7px] font-black uppercase tracking-widest leading-none",
+                              stock.tier === 'Emas' ? "bg-amber-100 text-amber-700 border border-amber-200" : 
+                              "bg-slate-100 text-slate-600 border border-slate-200"
+                            )}>
+                              {stock.tier}
+                            </span>
+                          )}
+                          <span className="text-[8px] font-black text-foreground uppercase tracking-tighter">
+                            {stock.status || "Mulai Beli"}
+                          </span>
+                        </div>
+                        <span className={cn(
+                          "text-[9px] font-black font-mono tabular-nums leading-none",
+                          (stock.distance || 0) <= 2 ? "text-emerald-500" : "text-amber-500"
+                        )}>
+                          MA3: {(stock.distance || 0).toFixed(1)}%
+                        </span>
+                      </div>
+                    ) : stock.maTarget ? (
                       <div className="flex flex-col items-center">
                         <span className="text-[8.5px] font-black text-emerald-500 whitespace-nowrap">
                           TP: Rp {(stock.smaValues?.[stock.maTarget] || 0).toLocaleString('id-ID')}

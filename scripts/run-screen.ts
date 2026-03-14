@@ -60,6 +60,12 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const currentVolume = volumes[volumes.length - 1];
                         const currentOpen = opens[opens.length - 1];
 
+                        // GLOBAL FILTER: Price must not have risen more than 5% from OPEN
+                        const gainFromOpen = ((currentPrice - currentOpen) / currentOpen) * 100;
+                        if (gainFromOpen > 5) {
+                            return; // Skip this stock
+                        }
+
                         // Check Diatas Awan
                         // Check Diatas Awan (Tiered)
                         const smaPeriodsAwan = [3, 5, 10, 20, 50, 100];
@@ -94,7 +100,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         }
 
                         // Check Bottoming (Reversal)
-                        const smaDataM = calculateMultipleSMAs(closes, [5, 10, 20, 50, 100]);
+                        const smaDataM = calculateMultipleSMAs(closes, [3, 5, 10, 20, 50, 100]);
                         const macdDataM = calculateMACD(closes);
                         const bResult = checkBottoming(
                             closes, opens, highs, lows, volumes,
@@ -105,6 +111,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         if (bResult.isValid) {
                             const rsiDataM = calculateRSI(closes);
                             const currentRsiM = rsiDataM[rsiDataM.length - 1];
+                            const ma3M = smaDataM[3][smaDataM[3].length - 1];
                             const ma50M = smaDataM[50][smaDataM[50].length - 1];
                             const ma100M = smaDataM[100][smaDataM[100].length - 1];
                             
@@ -123,9 +130,11 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                                 volumeRatio: bResult.volumeRatio, isVolumeSpike: true,
                                 gainFromCross: bResult.gainPercentage,
                                 rsi: currentRsiM,
+                                distance: ma3M ? ((currentPrice - ma3M) / ma3M) * 100 : 0,
                                 maTarget: maTargetM,
                                 distanceToTarget: distanceToTargetM,
                                 smaValues: {
+                                    '3': ma3M || 0,
                                     '10': smaDataM[10][smaDataM[10].length - 1] || 0,
                                     '20': smaDataM[20][smaDataM[20].length - 1] || 0,
                                     '50': ma50M || 0,
@@ -139,57 +148,65 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                     }
                 }
 
-                // 2. TURNAROUND logic (Monthly)
                 // 2. TURNAROUND logic (Follow the Trend: Weekly + Daily + MA20 Retest)
                 if (weeklyData && weeklyData.length >= 20 && dailyData && dailyData.length >= 60) {
                     const dCloses = (dailyData as any[]).map(d => d.close);
                     const dVolumes = (dailyData as any[]).map(d => d.volume || 0);
+                    const dOpens = (dailyData as any[]).map(d => d.open);
                     const wCloses = (weeklyData as any[]).map(d => d.close);
 
-                    const dMacd = calculateMACD(dCloses);
-                    const wMacd = calculateMACD(wCloses);
-                    const dSma = calculateMultipleSMAs(dCloses, [20]);
+                    const currentPriceT = dCloses[dCloses.length - 1];
+                    const currentOpenT = dOpens[dOpens.length - 1];
+                    const gainFromOpenT = ((currentPriceT - currentOpenT) / currentOpenT) * 100;
 
-                    const resultT = checkTurnaroundFollowTrend(
-                        dCloses, dVolumes, dSma[20],
-                        dMacd.macdLine, dMacd.signalLine,
-                        wMacd.macdLine, wMacd.signalLine
-                    );
+                    if (gainFromOpenT <= 5) {
+                        const dMacd = calculateMACD(dCloses);
+                        const wMacd = calculateMACD(wCloses);
+                        const dSma = calculateMultipleSMAs(dCloses, [3, 20]);
 
-                    if (resultT.isValid) {
-                        const rsiDataT = calculateRSI(dCloses);
-                        const currentRsiT = rsiDataT[rsiDataT.length - 1];
-                        const dSmaExtra = calculateMultipleSMAs(dCloses, [50, 100]);
-                        const ma50T = dSmaExtra[50][dSmaExtra[50].length - 1];
-                        const ma100T = dSmaExtra[100][dSmaExtra[100].length - 1];
-                        const currentPriceT = dCloses[dCloses.length - 1];
+                        const resultT = checkTurnaroundFollowTrend(
+                            dCloses, dVolumes, dSma[20],
+                            dMacd.macdLine, dMacd.signalLine,
+                            wMacd.macdLine, wMacd.signalLine
+                        );
 
-                        let maTargetT = null;
-                        let distanceToTargetT = null;
-                        if (ma50T && currentPriceT < ma50T) {
-                            maTargetT = 50;
-                            distanceToTargetT = ((ma50T - currentPriceT) / currentPriceT) * 100;
-                        } else if (ma100T && currentPriceT < ma100T) {
-                            maTargetT = 100;
-                            distanceToTargetT = ((ma100T - currentPriceT) / currentPriceT) * 100;
+                        if (resultT.isValid) {
+                            const rsiDataT = calculateRSI(dCloses);
+                            const currentRsiT = rsiDataT[rsiDataT.length - 1];
+                            const dSmaExtra = calculateMultipleSMAs(dCloses, [50, 100]);
+                            const ma3T = dSma[3][dSma[3].length - 1];
+                            const ma50T = dSmaExtra[50][dSmaExtra[50].length - 1];
+                            const ma100T = dSmaExtra[100][dSmaExtra[100].length - 1];
+
+                            let maTargetT = null;
+                            let distanceToTargetT = null;
+                            if (ma50T && currentPriceT < ma50T) {
+                                maTargetT = 50;
+                                distanceToTargetT = ((ma50T - currentPriceT) / currentPriceT) * 100;
+                            } else if (ma100T && currentPriceT < ma100T) {
+                                maTargetT = 100;
+                                distanceToTargetT = ((ma100T - currentPriceT) / currentPriceT) * 100;
+                            }
+
+                            resultsTurnaround.push({
+                                ticker, price: currentPriceT, volume: dVolumes[dVolumes.length - 1],
+                                status: resultT.status,
+                                distanceToMA20: resultT.distanceToMA20,
+                                distance: ma3T ? ((currentPriceT - ma3T) / ma3T) * 100 : 0,
+                                rsi: currentRsiT,
+                                maTarget: maTargetT,
+                                distanceToTarget: distanceToTargetT,
+                                smaValues: { 
+                                    '3': ma3T,
+                                    '20': dSma[20][dSma[20].length - 1],
+                                    '50': ma50T,
+                                    '100': ma100T
+                                },
+                                ohlcData: (dailyData as any[]).slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
+                                sparkline: dCloses.slice(-40)
+                            });
+                            console.log(`[TURNAROUND] FOUND: ${ticker}`);
                         }
-
-                        resultsTurnaround.push({
-                            ticker, price: currentPriceT, volume: dVolumes[dVolumes.length - 1],
-                            status: resultT.status,
-                            distanceToMA20: resultT.distanceToMA20,
-                            rsi: currentRsiT,
-                            maTarget: maTargetT,
-                            distanceToTarget: distanceToTargetT,
-                            smaValues: { 
-                                '20': dSma[20][dSma[20].length - 1],
-                                '50': ma50T,
-                                '100': ma100T
-                            },
-                            ohlcData: (dailyData as any[]).slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
-                            sparkline: dCloses.slice(-40)
-                        });
-                        console.log(`[TURNAROUND] FOUND: ${ticker}`);
                     }
                 }
             } catch (e: any) {

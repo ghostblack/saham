@@ -94,11 +94,15 @@ export async function POST(request: Request) {
             const currentVolume = volumes[volumes.length - 1];
             const currentOpen = opens[opens.length - 1];
 
+            // GLOBAL FILTER: Price must not have risen more than 5% from OPEN
+            const gainFromOpen = ((currentPrice - currentOpen) / currentOpen) * 100;
+            if (gainFromOpen > 5) return null;
+
             let isValid = false;
             let validationData: any = {};
 
             if (strategy === 'membumi' || strategy === 'cari_bottom') {
-                const smaData = calculateMultipleSMAs(closes, [5, 10, 20, 50, 100]);
+                const smaData = calculateMultipleSMAs(closes, [3, 5, 10, 20, 50, 100]);
                 const macdData = calculateMACD(closes);
                 const result = checkBottoming(
                     closes, opens, highs, lows, volumes,
@@ -109,7 +113,7 @@ export async function POST(request: Request) {
                 if (isValid) {
                     const rsiData = calculateRSI(closes);
                     const currentRsi = rsiData[rsiData.length - 1];
-                    
+                    const ma3 = smaData[3][smaData[3].length - 1];
                     const ma50 = smaData[50][smaData[50].length - 1];
                     const ma100 = smaData[100][smaData[100].length - 1];
                     
@@ -128,9 +132,11 @@ export async function POST(request: Request) {
                         volumeRatio: result.volumeRatio,
                         gainFromCross: result.gainPercentage,
                         rsi: currentRsi,
+                        distance: ma3 ? ((currentPrice - ma3) / ma3) * 100 : 0,
                         maTarget,
                         distanceToTarget,
                         smaValues: {
+                            '3': ma3 || 0,
                             '10': smaData[10][smaData[10].length - 1] || 0,
                             '20': smaData[20][smaData[20].length - 1] || 0,
                             '50': ma50 || 0,
@@ -150,7 +156,7 @@ export async function POST(request: Request) {
                 if (validWeekly.length < 20) return null;
 
                 const dailyMacd = calculateMACD(closes);
-                const dailySma = calculateMultipleSMAs(closes, [20, 50, 100]);
+                const dailySma = calculateMultipleSMAs(closes, [3, 20, 50, 100]);
                 const weeklyCloses = validWeekly.map(d => d.close);
                 const weeklyMacd = calculateMACD(weeklyCloses);
 
@@ -164,6 +170,7 @@ export async function POST(request: Request) {
                 if (isValid) {
                     const rsiData = calculateRSI(closes);
                     const currentRsi = rsiData[rsiData.length - 1];
+                    const ma3 = dailySma[3][dailySma[3].length - 1];
 
                     // Target is distance to the nearest significant MA (50 or 100) that is above current price
                     const ma50 = (dailySma[50] as any[])?.[dailySma[50].length - 1];
@@ -181,7 +188,7 @@ export async function POST(request: Request) {
                     }
 
                     const smas: Record<number, number | null> = {};
-                    [20, 50, 100].forEach(p => {
+                    [3, 20, 50, 100].forEach(p => {
                         const values = dailySma[p];
                         smas[p] = values[values.length - 1];
                     });
@@ -189,6 +196,7 @@ export async function POST(request: Request) {
                     validationData = {
                         status: result.status,
                         distanceToMA20: result.distanceToMA20,
+                        distance: ma3 ? ((currentPrice - ma3) / ma3) * 100 : 0,
                         rsi: currentRsi,
                         maTarget,
                         distanceToTarget,
