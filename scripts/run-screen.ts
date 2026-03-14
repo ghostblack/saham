@@ -100,7 +100,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         }
 
                         // Check Bottoming (Reversal)
-                        const smaDataM = calculateMultipleSMAs(closes, [3, 5, 10, 20, 50, 100]);
+                        const smaDataM = calculateMultipleSMAs(closes, [3, 5, 10, 20, 50, 100, 200]);
                         const macdDataM = calculateMACD(closes);
                         const bResult = checkBottoming(
                             closes, opens, highs, lows, volumes,
@@ -112,17 +112,19 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                             const rsiDataM = calculateRSI(closes);
                             const currentRsiM = rsiDataM[rsiDataM.length - 1];
                             const ma3M = smaDataM[3][smaDataM[3].length - 1];
-                            const ma50M = smaDataM[50][smaDataM[50].length - 1];
-                            const ma100M = smaDataM[100][smaDataM[100].length - 1];
                             
-                            let maTargetM = null;
-                            let distanceToTargetM = null;
-                            if (ma50M && currentPrice < ma50M) {
-                                maTargetM = 50;
-                                distanceToTargetM = ((ma50M - currentPrice) / currentPrice) * 100;
-                            } else if (ma100M && currentPrice < ma100M) {
-                                maTargetM = 100;
-                                distanceToTargetM = ((ma100M - currentPrice) / currentPrice) * 100;
+                            let maTargetM: number | null = null;
+                            let distanceToTargetM: number | null = null;
+                            
+                            // Find nearest MA above current price from [20, 50, 100, 200]
+                            const targetPeriods = [20, 50, 100, 200];
+                            for (const p of targetPeriods) {
+                                const maVal = smaDataM[p][smaDataM[p].length - 1];
+                                if (maVal && currentPrice < maVal) {
+                                    maTargetM = p;
+                                    distanceToTargetM = ((maVal - currentPrice) / currentPrice) * 100;
+                                    break;
+                                }
                             }
 
                             resultsBottom.push({
@@ -137,8 +139,9 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                                     '3': ma3M || 0,
                                     '10': smaDataM[10][smaDataM[10].length - 1] || 0,
                                     '20': smaDataM[20][smaDataM[20].length - 1] || 0,
-                                    '50': ma50M || 0,
-                                    '100': ma100M || 0
+                                    '50': smaDataM[50][smaDataM[50].length - 1] || 0,
+                                    '100': smaDataM[100][smaDataM[100].length - 1] || 0,
+                                    '200': smaDataM[200][smaDataM[200].length - 1] || 0
                                 },
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)
@@ -173,19 +176,21 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         if (resultT.isValid) {
                             const rsiDataT = calculateRSI(dCloses);
                             const currentRsiT = rsiDataT[rsiDataT.length - 1];
-                            const dSmaExtra = calculateMultipleSMAs(dCloses, [50, 100]);
-                            const ma3T = dSma[3][dSma[3].length - 1];
-                            const ma50T = dSmaExtra[50][dSmaExtra[50].length - 1];
-                            const ma100T = dSmaExtra[100][dSmaExtra[100].length - 1];
+                            const dSmaExtra = calculateMultipleSMAs(dCloses, [3, 20, 50, 100, 200]);
+                            const ma3T = dSmaExtra[3][dSmaExtra[3].length - 1];
 
-                            let maTargetT = null;
-                            let distanceToTargetT = null;
-                            if (ma50T && currentPriceT < ma50T) {
-                                maTargetT = 50;
-                                distanceToTargetT = ((ma50T - currentPriceT) / currentPriceT) * 100;
-                            } else if (ma100T && currentPriceT < ma100T) {
-                                maTargetT = 100;
-                                distanceToTargetT = ((ma100T - currentPriceT) / currentPriceT) * 100;
+                            let maTargetT: number | null = null;
+                            let distanceToTargetT: number | null = null;
+                            
+                            // Find nearest MA above current price from [50, 100, 200]
+                            const targetPeriods = [50, 100, 200];
+                            for (const p of targetPeriods) {
+                                const maVal = dSmaExtra[p][dSmaExtra[p].length - 1];
+                                if (maVal && currentPriceT < maVal) {
+                                    maTargetT = p;
+                                    distanceToTargetT = ((maVal - currentPriceT) / currentPriceT) * 100;
+                                    break;
+                                }
                             }
 
                             resultsTurnaround.push({
@@ -198,9 +203,10 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                                 distanceToTarget: distanceToTargetT,
                                 smaValues: { 
                                     '3': ma3T,
-                                    '20': dSma[20][dSma[20].length - 1],
-                                    '50': ma50T,
-                                    '100': ma100T
+                                    '20': dSmaExtra[20][dSmaExtra[20].length - 1],
+                                    '50': dSmaExtra[50][dSmaExtra[50].length - 1],
+                                    '100': dSmaExtra[100][dSmaExtra[100].length - 1],
+                                    '200': dSmaExtra[200][dSmaExtra[200].length - 1]
                                 },
                                 ohlcData: (dailyData as any[]).slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: dCloses.slice(-40)

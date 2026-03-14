@@ -102,7 +102,7 @@ export async function POST(request: Request) {
             let validationData: any = {};
 
             if (strategy === 'membumi' || strategy === 'cari_bottom') {
-                const smaData = calculateMultipleSMAs(closes, [3, 5, 10, 20, 50, 100]);
+                const smaData = calculateMultipleSMAs(closes, [3, 5, 10, 20, 50, 100, 200]);
                 const macdData = calculateMACD(closes);
                 const result = checkBottoming(
                     closes, opens, highs, lows, volumes,
@@ -114,17 +114,19 @@ export async function POST(request: Request) {
                     const rsiData = calculateRSI(closes);
                     const currentRsi = rsiData[rsiData.length - 1];
                     const ma3 = smaData[3][smaData[3].length - 1];
-                    const ma50 = smaData[50][smaData[50].length - 1];
-                    const ma100 = smaData[100][smaData[100].length - 1];
                     
-                    let maTarget = null;
-                    let distanceToTarget = null;
-                    if (ma50 && currentPrice < ma50) {
-                        maTarget = 50;
-                        distanceToTarget = ((ma50 - currentPrice) / currentPrice) * 100;
-                    } else if (ma100 && currentPrice < ma100) {
-                        maTarget = 100;
-                        distanceToTarget = ((ma100 - currentPrice) / currentPrice) * 100;
+                    let maTarget: number | null = null;
+                    let distanceToTarget: number | null = null;
+                    
+                    // Find nearest MA above current price from [20, 50, 100, 200]
+                    const targetPeriods = [20, 50, 100, 200];
+                    for (const p of targetPeriods) {
+                        const maVal = smaData[p][smaData[p].length - 1];
+                        if (maVal && currentPrice < maVal) {
+                            maTarget = p;
+                            distanceToTarget = ((maVal - currentPrice) / currentPrice) * 100;
+                            break;
+                        }
                     }
 
                     validationData = {
@@ -139,8 +141,9 @@ export async function POST(request: Request) {
                             '3': ma3 || 0,
                             '10': smaData[10][smaData[10].length - 1] || 0,
                             '20': smaData[20][smaData[20].length - 1] || 0,
-                            '50': ma50 || 0,
-                            '100': ma100 || 0
+                            '50': smaData[50][smaData[50].length - 1] || 0,
+                            '100': smaData[100][smaData[100].length - 1] || 0,
+                            '200': smaData[200][smaData[200].length - 1] || 0
                         },
                         ohlcData: (dailyData as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
@@ -170,26 +173,26 @@ export async function POST(request: Request) {
                 if (isValid) {
                     const rsiData = calculateRSI(closes);
                     const currentRsi = rsiData[rsiData.length - 1];
-                    const ma3 = dailySma[3][dailySma[3].length - 1];
+                    const dailySmaExtra = calculateMultipleSMAs(closes, [3, 20, 50, 100, 200]);
+                    const ma3 = dailySmaExtra[3][dailySmaExtra[3].length - 1];
 
-                    // Target is distance to the nearest significant MA (50 or 100) that is above current price
-                    const ma50 = (dailySma[50] as any[])?.[dailySma[50].length - 1];
-                    const ma100 = (dailySma[100] as any[])?.[dailySma[100].length - 1];
+                    let maTarget: number | null = null;
+                    let distanceToTarget: number | null = null;
                     
-                    let maTarget = null;
-                    let distanceToTarget = null;
-                    
-                    if (ma50 && currentPrice < ma50) {
-                        maTarget = 50;
-                        distanceToTarget = ((ma50 - currentPrice) / currentPrice) * 100;
-                    } else if (ma100 && currentPrice < ma100) {
-                        maTarget = 100;
-                        distanceToTarget = ((ma100 - currentPrice) / currentPrice) * 100;
+                    // Find nearest MA above current price from [50, 100, 200]
+                    const targetPeriods = [50, 100, 200];
+                    for (const p of targetPeriods) {
+                        const maVal = dailySmaExtra[p][dailySmaExtra[p].length - 1];
+                        if (maVal && currentPrice < maVal) {
+                            maTarget = p;
+                            distanceToTarget = ((maVal - currentPrice) / currentPrice) * 100;
+                            break;
+                        }
                     }
 
                     const smas: Record<number, number | null> = {};
-                    [3, 20, 50, 100].forEach(p => {
-                        const values = dailySma[p];
+                    [3, 20, 50, 100, 200].forEach(p => {
+                        const values = dailySmaExtra[p];
                         smas[p] = values[values.length - 1];
                     });
 
