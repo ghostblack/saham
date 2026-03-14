@@ -40,7 +40,7 @@ export function StockCard({ stock, activeTab, isSaved, onSave, onAnalyze }: Stoc
           </div>
           
           <div className="text-right">
-            <p className="text-base font-black text-foreground leading-none">Rp {stock.price.toLocaleString('id-ID')}</p>
+            <p className="text-base font-black text-foreground leading-none">Rp {stock.price?.toLocaleString('id-ID') || "-"}</p>
             <p className={cn(
               "text-[11px] font-black uppercase mt-1.5 tracking-tight",
               isGain ? "text-emerald-500" : "text-amber-500"

@@ -78,13 +78,17 @@ export async function POST(request: Request) {
 
             // Fetch Daily Data
             const dailyData = await getHistoricalData(ticker, periodDaily1, period2, '1d');
-            if (!dailyData || dailyData.length < 200) return null;
+            if (!dailyData) return null;
 
-            const closes = (dailyData as any[]).map(d => d.close);
-            const volumes = (dailyData as any[]).map(d => d.volume);
-            const opens = (dailyData as any[]).map(d => d.open);
-            const highs = (dailyData as any[]).map(d => d.high);
-            const lows = (dailyData as any[]).map(d => d.low);
+            // Ensure we only process valid data points
+            const validDaily = (dailyData as any[]).filter(d => d.close !== null && d.close !== undefined && d.volume !== null);
+            if (validDaily.length < 200) return null;
+
+            const closes = validDaily.map(d => d.close);
+            const volumes = validDaily.map(d => d.volume);
+            const opens = validDaily.map(d => d.open);
+            const highs = validDaily.map(d => d.high);
+            const lows = validDaily.map(d => d.low);
 
             const currentPrice = closes[closes.length - 1];
             const currentVolume = volumes[volumes.length - 1];
@@ -119,11 +123,14 @@ export async function POST(request: Request) {
                 }
             } else if (strategy === 'turnaround') {
                 const weeklyData = await getHistoricalData(ticker, periodWeekly1, period2, '1wk');
-                if (!weeklyData || weeklyData.length < 20) return null;
+                if (!weeklyData) return null;
+                
+                const validWeekly = (weeklyData as any[]).filter(d => d.close !== null && d.close !== undefined);
+                if (validWeekly.length < 20) return null;
 
                 const dailyMacd = calculateMACD(closes);
                 const dailySma = calculateMultipleSMAs(closes, [20]);
-                const weeklyCloses = (weeklyData as any[]).map(d => d.close);
+                const weeklyCloses = validWeekly.map(d => d.close);
                 const weeklyMacd = calculateMACD(weeklyCloses);
 
                 const result = checkTurnaroundFollowTrend(

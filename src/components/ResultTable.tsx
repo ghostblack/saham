@@ -184,7 +184,7 @@ export function ResultTable({
                   </TableCell>
                   <TableCell className="py-2 px-4 border-r border-border/40">
                     <span className="font-black text-foreground font-mono text-[12px] tabular-nums">
-                      {stock.price.toLocaleString('id-ID')}
+                      {stock.price?.toLocaleString('id-ID') || "-"}
                     </span>
                   </TableCell>
                   <TableCell className="py-2 px-4 border-r border-border/40">
