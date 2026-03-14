@@ -398,7 +398,7 @@ export default function Dashboard() {
                 <div className="flex flex-col gap-1">
                   <h2 className="text-2xl font-black tracking-tighter text-foreground font-serif italic text-primary">Market Discovery</h2>
                   <p className="text-[9px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-50">
-                    {activeTab === 'screener_awan' && "Awan: Siap Terbang (Momentum Breakout)"}
+                    {activeTab === 'screener_awan' && "Awan Tiered: Emas & Silver (All MAs Breakout)"}
                     {activeTab === 'screener_bottom' && "Bottoming: Reversal Trend (MA 10 & 20 Cross)"}
                     {activeTab === 'screener_turnaround' && "Turnaround: Teknikal Turnaround (Pivot points)"}
                   </p>

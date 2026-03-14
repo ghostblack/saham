@@ -2,7 +2,7 @@ import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../src/lib/firebase';
 import { IDX_TICKERS } from '../src/lib/tickers';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, isHammerPattern } from '../src/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, checkDiatasAwanTiered, isHammerPattern } from '../src/lib/screener';
 import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '../src/lib/indicators';
 import YahooFinance from 'yahoo-finance2';
 
@@ -61,43 +61,28 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const currentOpen = opens[opens.length - 1];
 
                         // Check Diatas Awan
-                        const gainFromOpen = (currentPrice - currentOpen) / currentOpen;
-                        if (gainFromOpen <= 0.05) {
-                            const smaPeriods = [5, 10, 20, 50, 100];
-                            const smaData = calculateMultipleSMAs(closes, smaPeriods);
-                            const macdData = calculateMACD(closes);
-                            const latestSmas: Record<number, number | null> = {};
-                            smaPeriods.forEach(p => { latestSmas[p] = smaData[p][smaData[p].length - 1]; });
+                        // Check Diatas Awan (Tiered)
+                        const smaPeriodsAwan = [3, 5, 10, 20, 50, 100];
+                        const smaDataAwan = calculateMultipleSMAs(closes, smaPeriodsAwan);
+                        const macdDataAwan = calculateMACD(closes);
+                        const volumeInfoAwan = checkVolumeSpike(volumes, 10);
+                        
+                        const latestSmasAwan: Record<number, number | null> = {};
+                        smaPeriodsAwan.forEach(p => { latestSmasAwan[p] = smaDataAwan[p][smaDataAwan[p].length - 1]; });
 
-                            const validation = validateSmaCriteria(currentPrice, latestSmas, smaPeriods);
-                            const volumeInfo = checkVolumeSpike(volumes, 10);
-
-                            if (validation) {
-                                const mLine = macdData.macdLine;
-                                const sLine = macdData.signalLine;
-                                const len = mLine.length;
-                                let macdStatus = 'Neutral';
-                                if (len >= 2) {
-                                    const currM = mLine[len - 1], prevM = mLine[len - 2];
-                                    const currS = sLine[len - 1], prevS = sLine[len - 2];
-                                    if (currM !== null && prevM !== null && currS !== null && prevS !== null) {
-                                        if (currM > currS && prevM <= prevS) macdStatus = 'Golden Cross';
-                                        else if (currM < currS && prevM >= prevS) macdStatus = 'Dead Cross';
-                                        else if (currM > currS) macdStatus = 'Above Signal';
-                                        else macdStatus = 'Below Signal';
-                                    }
-                                }
-
-                                resultsAwan.push({
-                                    ticker, price: currentPrice, volume: currentVolume,
-                                    volumeRatio: volumeInfo.ratio, isVolumeSpike: volumeInfo.isSpike,
-                                    isRocket: volumeInfo.isRocket, macdStatus, ...validation,
-                                    smaFullData: { 10: smaData[10].slice(-40), 20: smaData[20].slice(-40), 50: smaData[50].slice(-40), 100: smaData[100].slice(-40) },
-                                    ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
-                                    sparkline: closes.slice(-40)
-                                });
-                                console.log(`[AWAN] FOUND: ${ticker}`);
-                            }
+                        const tieredResult = checkDiatasAwanTiered(currentPrice, volumes, latestSmasAwan, macdDataAwan.macdLine, macdDataAwan.signalLine);
+                        
+                        if (tieredResult.isValid) {
+                            resultsAwan.push({
+                                ticker, price: currentPrice, volume: currentVolume,
+                                volumeRatio: volumeInfoAwan.ratio, isVolumeSpike: volumeInfoAwan.isSpike,
+                                tier: tieredResult.tier, // "Emas", "Silver"
+                                status: tieredResult.status, // "Beli Sekarang", "Mulai Beli"
+                                smaValues: latestSmasAwan,
+                                ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
+                                sparkline: closes.slice(-40)
+                            });
+                            console.log(`[AWAN] FOUND (${tieredResult.tier}): ${ticker}`);
                         }
 
                         // Check Bottoming (Reversal)

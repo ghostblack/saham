@@ -102,6 +102,62 @@ export function validateSmaCriteria(
 }
 
 /**
+ * FITUR: DIATAS AWAN Tiered (Emas vs Silver)
+ * Diatas awan yang paling bagus jika harga diatas semua MA: 3, 5, 10, 20, 50, 100
+ * Dan belum naik > 5% dari MA dasar (MA 3).
+ */
+export function checkDiatasAwanTiered(
+    currentPrice: number,
+    volumes: number[],
+    smas: Record<number, number | null>,
+    macdLine: (number | null)[],
+    signalLine: (number | null)[]
+): { isValid: boolean; tier: 'Emas' | 'Silver' | null; status: string } {
+    const requiredPeriods = [3, 5, 10, 20, 50, 100];
+    
+    // 1. MUST be above all MAs: 3, 5, 10, 20, 50, 100
+    const allSmasExist = requiredPeriods.every(p => smas[p] !== null && smas[p] !== undefined);
+    if (!allSmasExist) return { isValid: false, tier: null, status: '' };
+
+    const isAboveAll = requiredPeriods.every(p => currentPrice > (smas[p] as number));
+    if (!isAboveAll) return { isValid: false, tier: null, status: '' };
+
+    // 2. Gain < 5% from the nearest support MA (MA 3 or lowest of them)
+    const baseMa = smas[3] || smas[5] || 0;
+    const gainFromMa = ((currentPrice - (baseMa as number)) / (baseMa as number)) * 100;
+    if (gainFromMa > 5) return { isValid: false, tier: null, status: '' };
+
+    // 3. Volume Check (Current > Avg 20)
+    const volInfo = checkVolumeSpike(volumes, 20);
+    const hasVolumeSupport = volInfo.ratio > 1.0; // Current > Avg 20
+
+    // 4. MACD Confirmation for Tiers
+    const len = macdLine.length;
+    if (len < 2) return { isValid: false, tier: null, status: '' };
+    
+    const latestMacd = macdLine[len - 1];
+    const latestSignal = signalLine[len - 1];
+
+    if (latestMacd === null || latestSignal === null) return { isValid: false, tier: null, status: '' };
+
+    // Emas: MACD Bullish (MACD > Signal) AND Volume Support
+    // Silver: Bearish MACD OR No Volume Support
+    if (latestMacd > latestSignal && hasVolumeSupport) {
+        return { 
+            isValid: true, 
+            tier: 'Emas', 
+            status: 'Beli Sekarang' 
+        };
+    } else {
+        return { 
+            isValid: true, 
+            tier: 'Silver', 
+            status: 'Mulai Beli' 
+        };
+    }
+}
+
+/**
  * Helper: Detects Hammer candlestick pattern.
  */
 export function isHammerPattern(close: number, open: number, high: number, low: number) {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, isHammerPattern } from '@/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, checkDiatasAwanTiered, isHammerPattern } from '@/lib/screener';
 import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '@/lib/indicators';
 import { IDX_TICKERS } from '@/lib/tickers';
 import { db } from '@/lib/firebase';
@@ -9,7 +9,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 let cache: Record<string, { data: any[], timestamp: number }> = {};
 const CACHE_DURATION = 15 * 60 * 1000;
 
-const SMA_PERIODS = [5, 10, 20, 50, 100, 200];
+const SMA_PERIODS = [3, 5, 10, 20, 50, 100, 200];
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
@@ -129,67 +129,33 @@ export async function POST(request: Request) {
                     };
                 }
             } else {
-                // diatas_awan
-                const gainFromOpen = (currentPrice - currentOpen) / currentOpen;
-                if (gainFromOpen <= 0.05) {
-                    const smaPeriods = [5, 10, 20, 50, 100];
-                    const smaData = calculateMultipleSMAs(closes, smaPeriods);
-                    const macdData = calculateMACD(closes);
-                    
-                    const latestSmas: Record<number, number | null> = {};
-                    smaPeriods.forEach(p => {
-                        const values = smaData[p];
-                        latestSmas[p] = values[values.length - 1];
-                    });
+                // diatas_awan (Tiered: Emas & Silver)
+                const smaPeriodsTiered = [3, 5, 10, 20, 50, 100];
+                const smaData = calculateMultipleSMAs(closes, smaPeriodsTiered);
+                const macdData = calculateMACD(closes);
+                const volumeInfo = checkVolumeSpike(volumes);
+                
+                const smas: Record<number, number | null> = {};
+                smaPeriodsTiered.forEach(p => {
+                    const values = smaData[p];
+                    smas[p] = values[values.length - 1];
+                });
 
-                    const validation = validateSmaCriteria(currentPrice, latestSmas, smaPeriods);
-                    const volumeInfo = checkVolumeSpike(volumes);
-
-                    if (validation) {
-                        // Calculate MACD Status
-                        const mLine = macdData.macdLine;
-                        const sLine = macdData.signalLine;
-                        const len = mLine.length;
-                        let macdStatus = 'Neutral';
-
-                        if (len >= 2) {
-                            const currM = mLine[len - 1];
-                            const prevM = mLine[len - 2];
-                            const currS = sLine[len - 1];
-                            const prevS = sLine[len - 2];
-
-                            if (currM !== null && prevM !== null && currS !== null && prevS !== null) {
-                                if (currM > currS && prevM <= prevS) {
-                                    macdStatus = 'Golden Cross';
-                                } else if (currM < currS && prevM >= prevS) {
-                                    macdStatus = 'Dead Cross';
-                                } else if (currM > currS) {
-                                    macdStatus = 'Above Signal';
-                                } else {
-                                    macdStatus = 'Below Signal';
-                                }
-                            }
-                        }
-
-                        isValid = true;
-                        validationData = {
-                            volumeRatio: volumeInfo.ratio,
-                            isVolumeSpike: volumeInfo.isSpike,
-                            isRocket: volumeInfo.isRocket,
-                            macdStatus,
-                            ...validation,
-                            smaFullData: {
-                                10: smaData[10].slice(-40),
-                                20: smaData[20].slice(-40),
-                                50: smaData[50].slice(-40),
-                                100: smaData[100].slice(-40)
-                            },
-                            ohlcData: (data as any[]).slice(-40).map(d => ({
-                                x: new Date(d.date).getTime(),
-                                y: [d.open, d.high, d.low, d.close]
-                            }))
-                        };
-                    }
+                const tieredResult = checkDiatasAwanTiered(currentPrice, volumes, smas, macdData.macdLine, macdData.signalLine);
+                
+                if (tieredResult.isValid) {
+                    isValid = true;
+                    validationData = {
+                        tier: tieredResult.tier, // "Emas", "Silver"
+                        status: tieredResult.status, // "Beli Sekarang", "Mulai Beli"
+                        volumeRatio: volumeInfo.ratio,
+                        isVolumeSpike: volumeInfo.isSpike,
+                        smaValues: smas,
+                        ohlcData: (data as any[]).slice(-40).map(d => ({
+                            x: new Date(d.date).getTime(),
+                            y: [d.open, d.high, d.low, d.close]
+                        }))
+                    };
                 }
             }
 

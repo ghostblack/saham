@@ -60,11 +60,22 @@ export function StockCard({ stock, activeTab, isSaved, onSave, onAnalyze }: Stoc
           </div>
           <div className="rounded-2xl bg-muted/20 p-3 border border-border/30">
             <p className="text-[9px] font-bold uppercase text-muted-foreground/40 mb-1 tracking-widest">Algorithm Status</p>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-black text-foreground truncate uppercase tracking-tighter">
-                {stock.status || "Priced In"}
-              </span>
-              {stock.isRocket && <Rocket size={10} className="text-primary animate-pulse" />}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                {stock.tier && (
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
+                    stock.tier === 'Emas' ? "bg-amber-100 text-amber-700 border border-amber-200" : 
+                    "bg-slate-100 text-slate-600 border border-slate-200"
+                  )}>
+                    {stock.tier}
+                  </span>
+                )}
+                <span className="text-[10px] font-black text-foreground truncate uppercase tracking-tighter">
+                  {stock.status || "Priced In"}
+                </span>
+                {stock.isRocket && <Rocket size={10} className="text-primary animate-pulse" />}
+              </div>
             </div>
           </div>
         </div>
