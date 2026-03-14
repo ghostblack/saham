@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, checkDiatasAwanTiered, isHammerPattern } from '@/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaroundFollowTrend, checkBottoming, checkDiatasAwanTiered, isHammerPattern } from '@/lib/screener';
 import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '@/lib/indicators';
 import { IDX_TICKERS } from '@/lib/tickers';
 import { db } from '@/lib/firebase';
@@ -70,17 +70,21 @@ export async function POST(request: Request) {
 
         // Process this specific batch
         const batchPromises: Promise<any>[] = tickers.map(async (ticker) => {
-            const interval = strategy === 'turnaround' ? '1mo' : '1d';
-            const data = await getHistoricalData(ticker, period1, period2, interval);
-            // Untuk turnaround butuh setidaknya 6 data bulanan. Untuk daily butuh 200 data harian.
-            const minDataLen = strategy === 'turnaround' ? 6 : 200;
-            if (!data || data.length < minDataLen) return null;
+            const periodDaily1 = new Date();
+            periodDaily1.setFullYear(period2.getFullYear() - 1);
+            
+            const periodWeekly1 = new Date();
+            periodWeekly1.setFullYear(period2.getFullYear() - 2);
 
-            const closes = (data as any[]).map(d => d.close);
-            const volumes = (data as any[]).map(d => d.volume);
-            const opens = (data as any[]).map(d => d.open);
-            const highs = (data as any[]).map(d => d.high);
-            const lows = (data as any[]).map(d => d.low);
+            // Fetch Daily Data
+            const dailyData = await getHistoricalData(ticker, periodDaily1, period2, '1d');
+            if (!dailyData || dailyData.length < 200) return null;
+
+            const closes = (dailyData as any[]).map(d => d.close);
+            const volumes = (dailyData as any[]).map(d => d.volume);
+            const opens = (dailyData as any[]).map(d => d.open);
+            const highs = (dailyData as any[]).map(d => d.high);
+            const lows = (dailyData as any[]).map(d => d.low);
 
             const currentPrice = closes[closes.length - 1];
             const currentVolume = volumes[volumes.length - 1];
@@ -107,25 +111,39 @@ export async function POST(request: Request) {
                             '10': smaData[10][smaData[10].length - 1] || 0,
                             '20': smaData[20][smaData[20].length - 1] || 0
                         },
-                        ohlcData: (data as any[]).slice(-40).map(d => ({
+                        ohlcData: (dailyData as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
                             y: [d.open, d.high, d.low, d.close]
                         }))
                     };
                 }
             } else if (strategy === 'turnaround') {
-                const macdData = calculateMACD(closes);
-                const volumeInfo = checkVolumeSpike(volumes, 6); // Rata-rata 6 bulan untuk bulanan
-                isValid = checkTurnaround(closes, volumes, macdData.macdLine, macdData.signalLine);
+                const weeklyData = await getHistoricalData(ticker, periodWeekly1, period2, '1wk');
+                if (!weeklyData || weeklyData.length < 20) return null;
+
+                const dailyMacd = calculateMACD(closes);
+                const dailySma = calculateMultipleSMAs(closes, [20]);
+                const weeklyCloses = (weeklyData as any[]).map(d => d.close);
+                const weeklyMacd = calculateMACD(weeklyCloses);
+
+                const result = checkTurnaroundFollowTrend(
+                    closes, volumes, dailySma[20], 
+                    dailyMacd.macdLine, dailyMacd.signalLine,
+                    weeklyMacd.macdLine, weeklyMacd.signalLine
+                );
+
+                isValid = result.isValid;
                 if (isValid) {
-                    const smaData = calculateMultipleSMAs(closes, [10, 20]); // Cukup 10 & 20 untuk context reversal
                     validationData = {
-                        isVolumeSpike: volumeInfo.isSpike,
-                        volumeRatio: volumeInfo.ratio,
+                        status: result.status,
+                        distanceToMA20: result.distanceToMA20,
                         smaValues: {
-                            '10': smaData[10][smaData[10].length - 1] || 0,
-                            '20': smaData[20][smaData[20].length - 1] || 0
-                        }
+                            '20': dailySma[20][dailySma[20].length - 1]
+                        },
+                        ohlcData: (dailyData as any[]).slice(-40).map(d => ({
+                            x: new Date(d.date).getTime(),
+                            y: [d.open, d.high, d.low, d.close]
+                        }))
                     };
                 }
             } else {
@@ -141,7 +159,10 @@ export async function POST(request: Request) {
                     smas[p] = values[values.length - 1];
                 });
 
-                const tieredResult = checkDiatasAwanTiered(currentPrice, volumes, smas, macdData.macdLine, macdData.signalLine);
+                const prevPrice = closes[closes.length - 2];
+                const dailyChangePercent = ((currentPrice - prevPrice) / prevPrice) * 100;
+
+                const tieredResult = checkDiatasAwanTiered(currentPrice, dailyChangePercent, volumes, smas, macdData.macdLine, macdData.signalLine);
                 
                 if (tieredResult.isValid) {
                     isValid = true;
@@ -151,7 +172,7 @@ export async function POST(request: Request) {
                         volumeRatio: volumeInfo.ratio,
                         isVolumeSpike: volumeInfo.isSpike,
                         smaValues: smas,
-                        ohlcData: (data as any[]).slice(-40).map(d => ({
+                        ohlcData: (dailyData as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
                             y: [d.open, d.high, d.low, d.close]
                         }))

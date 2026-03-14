@@ -2,7 +2,7 @@ import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../src/lib/firebase';
 import { IDX_TICKERS } from '../src/lib/tickers';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, checkDiatasAwanTiered, isHammerPattern } from '../src/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaroundFollowTrend, checkBottoming, checkDiatasAwanTiered, isHammerPattern } from '../src/lib/screener';
 import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '../src/lib/indicators';
 import YahooFinance from 'yahoo-finance2';
 
@@ -21,8 +21,8 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
     const periodDaily1 = new Date();
     periodDaily1.setFullYear(period2.getFullYear() - 1);
     
-    const periodMonthly1 = new Date();
-    periodMonthly1.setFullYear(period2.getFullYear() - 3);
+    const periodWeekly1 = new Date();
+    periodWeekly1.setFullYear(period2.getFullYear() - 2);
 
     // --- PHASE 1: PRE-FILTERING (DISABLED - Using all tickers) ---
     const liquidTickers = tickers;
@@ -42,9 +42,9 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                 // Stochastic delay to avoid robotic patterns
                 await sleep(Math.random() * 500);
 
-                const [dailyData, monthlyData] = await Promise.all([
+                const [dailyData, weeklyData] = await Promise.all([
                     getHistoricalData(ticker, periodDaily1, period2, '1d'),
-                    getHistoricalData(ticker, periodMonthly1, period2, '1mo')
+                    getHistoricalData(ticker, periodWeekly1, period2, '1wk')
                 ]);
 
                 // 1. DIATAS AWAN / CARI BOTTOM logic (Daily)
@@ -70,7 +70,10 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const latestSmasAwan: Record<number, number | null> = {};
                         smaPeriodsAwan.forEach(p => { latestSmasAwan[p] = smaDataAwan[p][smaDataAwan[p].length - 1]; });
 
-                        const tieredResult = checkDiatasAwanTiered(currentPrice, volumes, latestSmasAwan, macdDataAwan.macdLine, macdDataAwan.signalLine);
+                        const prevPriceAwan = closes[closes.length - 2];
+                        const dailyChangePercentAwan = ((currentPrice - prevPriceAwan) / prevPriceAwan) * 100;
+
+                        const tieredResult = checkDiatasAwanTiered(currentPrice, dailyChangePercentAwan, volumes, latestSmasAwan, macdDataAwan.macdLine, macdDataAwan.signalLine);
                         
                         if (tieredResult.isValid) {
                             resultsAwan.push({
@@ -112,36 +115,32 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                 }
 
                 // 2. TURNAROUND logic (Monthly)
-                if (monthlyData && monthlyData.length >= 6) {
-                    const validMonthly = (monthlyData as any[]).filter(d => d.close !== null && d.close !== undefined);
-                    if (validMonthly.length >= 6) {
-                        const mCloses = validMonthly.map(d => d.close);
-                        const mVolumes = validMonthly.map(d => d.volume || 0);
-                        const mMacd = calculateMACD(mCloses);
-                        const isTurnaround = checkTurnaround(mCloses, mVolumes, mMacd.macdLine, mMacd.signalLine);
-                        if (isTurnaround) {
-                            const volumeInfoT = checkVolumeSpike(mVolumes, 6);
-                            
-                            // Find MACD cross index to calculate gain from signal
-                            let crossIndex = -1;
-                            for (let j = mMacd.macdLine.length - 1; j >= 1; j--) {
-                                if (mMacd.macdLine[j]! > mMacd.signalLine[j]! && mMacd.macdLine[j-1]! <= mMacd.signalLine[j-1]!) {
-                                    crossIndex = j;
-                                    break;
-                                }
-                            }
-                            const crossPrice = crossIndex !== -1 ? mCloses[crossIndex] : mCloses[mCloses.length - 1];
-                            const gainFromCross = ((mCloses[mCloses.length - 1] - crossPrice) / crossPrice) * 100;
+                // 2. TURNAROUND logic (Follow the Trend: Weekly + Daily + MA20 Retest)
+                if (weeklyData && weeklyData.length >= 20 && dailyData && dailyData.length >= 60) {
+                    const dCloses = (dailyData as any[]).map(d => d.close);
+                    const dVolumes = (dailyData as any[]).map(d => d.volume || 0);
+                    const wCloses = (weeklyData as any[]).map(d => d.close);
 
-                            resultsTurnaround.push({
-                                ticker, price: mCloses[mCloses.length - 1], volume: mVolumes[mVolumes.length - 1],
-                                isVolumeSpike: volumeInfoT.isSpike, volumeRatio: volumeInfoT.ratio, smaValues: {},
-                                gainFromCross,
-                                ohlcData: validMonthly.slice(-12).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
-                                sparkline: mCloses.slice(-12)
-                            });
-                            console.log(`[TURNAROUND] FOUND: ${ticker}`);
-                        }
+                    const dMacd = calculateMACD(dCloses);
+                    const wMacd = calculateMACD(wCloses);
+                    const dSma = calculateMultipleSMAs(dCloses, [20]);
+
+                    const resultT = checkTurnaroundFollowTrend(
+                        dCloses, dVolumes, dSma[20],
+                        dMacd.macdLine, dMacd.signalLine,
+                        wMacd.macdLine, wMacd.signalLine
+                    );
+
+                    if (resultT.isValid) {
+                        resultsTurnaround.push({
+                            ticker, price: dCloses[dCloses.length - 1], volume: dVolumes[dVolumes.length - 1],
+                            status: resultT.status,
+                            distanceToMA20: resultT.distanceToMA20,
+                            smaValues: { '20': dSma[20][dSma[20].length - 1] },
+                            ohlcData: (dailyData as any[]).slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
+                            sparkline: dCloses.slice(-40)
+                        });
+                        console.log(`[TURN] FOUND: ${ticker}`);
                     }
                 }
             } catch (e: any) {

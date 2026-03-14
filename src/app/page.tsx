@@ -400,7 +400,7 @@ export default function Dashboard() {
                   <p className="text-[9px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-50">
                     {activeTab === 'screener_awan' && "Awan Tiered: Emas & Silver (All MAs Breakout)"}
                     {activeTab === 'screener_bottom' && "Bottoming: Reversal Trend (MA 10 & 20 Cross)"}
-                    {activeTab === 'screener_turnaround' && "Turnaround: Teknikal Turnaround (Pivot points)"}
+                    {activeTab === 'screener_turnaround' && "Turnaround: Follow the Trend (Retest MA 20)"}
                   </p>
                   <div className="flex items-center gap-2 mt-2">
                     <div className="flex items-center gap-1.5 px-2 py-0.5 border border-border/60 bg-muted/5 text-muted-foreground font-bold text-[8px] uppercase tracking-widest">

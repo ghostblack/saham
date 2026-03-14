@@ -108,6 +108,7 @@ export function validateSmaCriteria(
  */
 export function checkDiatasAwanTiered(
     currentPrice: number,
+    dailyChangePercent: number,
     volumes: number[],
     smas: Record<number, number | null>,
     macdLine: (number | null)[],
@@ -122,10 +123,14 @@ export function checkDiatasAwanTiered(
     const isAboveAll = requiredPeriods.every(p => currentPrice > (smas[p] as number));
     if (!isAboveAll) return { isValid: false, tier: null, status: '' };
 
-    // 2. Gain < 5% from the nearest support MA (MA 3 or lowest of them)
+    // 2. Entry Price Protection (User: "maksimal 3% kenaikan harian dan 3% dari MA 3")
+    // a. Daily Change Limit
+    if (dailyChangePercent > 3) return { isValid: false, tier: null, status: '' };
+
+    // b. Distance from Base MA (MA 3)
     const baseMa = smas[3] || smas[5] || 0;
-    const gainFromMa = ((currentPrice - (baseMa as number)) / (baseMa as number)) * 100;
-    if (gainFromMa > 5) return { isValid: false, tier: null, status: '' };
+    const distanceToMa = ((currentPrice - (baseMa as number)) / (baseMa as number)) * 100;
+    if (distanceToMa > 3) return { isValid: false, tier: null, status: '' };
 
     // 3. Volume Check (Current > Avg 20)
     const volInfo = checkVolumeSpike(volumes, 20);
@@ -290,68 +295,57 @@ export function checkVolumeSpike(volumes: number[], period: number = 20) {
 }
 
 /**
- * FITUR 3: TURNAROUND (Monthly MACD & Sideways Breakout)
- * Mencari saham yang reversal dari tren turun jangka panjang berdasarkan MACD bulanan
- * dan disertai akumulasi volume.
+ * FITUR 3: TURNAROUND (Follow the Trend)
+ * Konsep: Beli saat retest MA 20 setelah reversal terkonfirmasi Weekly & Daily MACD.
  */
-export function checkTurnaround(
-    monthlyCloses: number[],
-    monthlyVolumes: number[],
-    monthlyMacdLine: (number | null)[],
-    monthlySignalLine: (number | null)[]
-) {
-    if (monthlyCloses.length < 6 || monthlyMacdLine.length < 6) return false;
-
-    const currentClose = monthlyCloses[monthlyCloses.length - 1];
-    const currentVolume = monthlyVolumes[monthlyVolumes.length - 1];
-    const prevVolume = monthlyVolumes[monthlyVolumes.length - 2];
-
-    // 1. Monthly MACD Crossover (Baru cross/mulai cross ke atas)
-    let hasGoldenCross = false;
-    const daysToCheck = 2; // Cek 2 bulan terakhir
-    const startIndex = monthlyMacdLine.length - daysToCheck - 1;
-
-    for (let i = Math.max(1, startIndex); i < monthlyMacdLine.length; i++) {
-        const prevMacd = monthlyMacdLine[i - 1];
-        const prevSignal = monthlySignalLine[i - 1];
-        const currentMacd = monthlyMacdLine[i];
-        const currentSignal = monthlySignalLine[i];
-
-        if (prevMacd !== null && prevSignal !== null && currentMacd !== null && currentSignal !== null) {
-            // Jika MACD tadinya di bawah signal lalu memotong ke atas
-            if (prevMacd <= prevSignal && currentMacd > currentSignal) {
-                hasGoldenCross = true;
-                break;
-            }
-        }
+export function checkTurnaroundFollowTrend(
+    dailyCloses: number[],
+    dailyVolumes: number[],
+    dailySma20: (number | null)[],
+    dailyMacdLine: (number | null)[],
+    dailySignalLine: (number | null)[],
+    weeklyMacdLine: (number | null)[],
+    weeklySignalLine: (number | null)[]
+): { isValid: boolean; status: string; distanceToMA20: number } {
+    if (dailyCloses.length < 20 || dailyMacdLine.length < 2 || weeklyMacdLine.length < 2) {
+        return { isValid: false, status: '', distanceToMA20: 0 };
     }
 
-    if (!hasGoldenCross) {
-        // Toleransi: jika saat ini MACD menempel/mulai di atas signal (baru akan cross bulan ini)
-        const currentMacd = monthlyMacdLine[monthlyMacdLine.length - 1];
-        const currentSignal = monthlySignalLine[monthlySignalLine.length - 1];
-        if (currentMacd === null || currentSignal === null || currentMacd < currentSignal) {
-            return false;
-        }
+    const currentPrice = dailyCloses[dailyCloses.length - 1];
+    const currentSma20 = dailySma20[dailySma20.length - 1];
+    
+    if (currentSma20 === null) return { isValid: false, status: '', distanceToMA20: 0 };
+
+    // 1. Weekly MACD MUST be Bullish (Golden Cross or Above Signal)
+    const wMacd = weeklyMacdLine[weeklyMacdLine.length - 1];
+    const wSignal = weeklySignalLine[weeklySignalLine.length - 1];
+    if (wMacd === null || wSignal === null || wMacd <= wSignal) {
+        return { isValid: false, status: '', distanceToMA20: 0 };
     }
 
-    // 2. Accumulation Volume (Bulan ini ATAU bulan lalu harus lebih besar dari rata-rata 6 bulan sebelumnya)
-    const prev6MonthsVol = monthlyVolumes.slice(-8, -2); // Ambil 6 bulan sebelum 2 bulan terakhir
-    const avg6MonthsVol = prev6MonthsVol.reduce((a, b) => a + b, 0) / prev6MonthsVol.length;
-
-    // Syarat akumulasi: volume bulan ini atau kemaren harus melonjak > 1.2x dari rata-rata lama
-    if (currentVolume <= avg6MonthsVol * 1.2 && prevVolume <= avg6MonthsVol * 1.2) {
-        return false;
+    // 2. Daily MACD MUST be Bullish (Golden Cross or Above Signal)
+    const dMacd = dailyMacdLine[dailyMacdLine.length - 1];
+    const dSignal = dailySignalLine[dailySignalLine.length - 1];
+    if (dMacd === null || dSignal === null || dMacd <= dSignal) {
+        return { isValid: false, status: '', distanceToMA20: 0 };
     }
 
-    // 3. Sideways Breakout (Harga saat ini harus lebih tinggi/mulai naik dibanding harga rata-rata 3-5 bulan lalu)
-    const prev3to5MonthsCloses = monthlyCloses.slice(-6, -2);
-    const avgSidewaysPrice = prev3to5MonthsCloses.reduce((a, b) => a + b, 0) / prev3to5MonthsCloses.length;
+    // 3. Price MUST be above MA 20 BUT close to it (Retest)
+    // User: "sedekat mungkin dengan ma 20"
+    if (currentPrice < currentSma20) return { isValid: false, status: '', distanceToMA20: 0 };
+    
+    const distanceToMA20 = ((currentPrice - currentSma20) / currentSma20) * 100;
+    
+    // Syarat: Jarak ke MA 20 maksimal 2.5% (Retest area)
+    if (distanceToMA20 > 2.5) return { isValid: false, status: '', distanceToMA20: 0 };
 
-    // Bebas apakah dia breakout atau mulai naik pelan-pelan sedemikian rupa
-    if (currentClose <= avgSidewaysPrice * 1.02) { // minimal 2% di atas rata2 area sideways
-        return false;
-    }
+    // 4. Volume Confirmation (Volume hari ini harus lumayan, minimal > 0.8x avg volume)
+    const volInfo = checkVolumeSpike(dailyVolumes, 20);
+    if (volInfo.ratio < 0.8) return { isValid: false, status: '', distanceToMA20: 0 };
 
-    return true;
+    return {
+        isValid: true,
+        status: 'Beli di Support (MA 20)',
+        distanceToMA20
+    };
 }
