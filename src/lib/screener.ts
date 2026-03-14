@@ -113,24 +113,24 @@ export function checkDiatasAwanTiered(
     smas: Record<number, number | null>,
     macdLine: (number | null)[],
     signalLine: (number | null)[]
-): { isValid: boolean; tier: 'Emas' | 'Silver' | null; status: string } {
+): { isValid: boolean; tier: 'Emas' | 'Silver' | null; status: string; distance: number } {
     const requiredPeriods = [3, 5, 10, 20, 50, 100];
     
     // 1. MUST be above all MAs: 3, 5, 10, 20, 50, 100
     const allSmasExist = requiredPeriods.every(p => smas[p] !== null && smas[p] !== undefined);
-    if (!allSmasExist) return { isValid: false, tier: null, status: '' };
+    if (!allSmasExist) return { isValid: false, tier: null, status: '', distance: 0 };
 
     const isAboveAll = requiredPeriods.every(p => currentPrice > (smas[p] as number));
-    if (!isAboveAll) return { isValid: false, tier: null, status: '' };
+    if (!isAboveAll) return { isValid: false, tier: null, status: '', distance: 0 };
 
     // 2. Entry Price Protection (User: "maksimal 3% kenaikan harian dan 3% dari MA 3")
     // a. Daily Change Limit
-    if (dailyChangePercent > 3) return { isValid: false, tier: null, status: '' };
+    if (dailyChangePercent > 3) return { isValid: false, tier: null, status: '', distance: 0 };
 
     // b. Distance from Base MA (MA 3)
     const baseMa = smas[3] || smas[5] || 0;
     const distanceToMa = ((currentPrice - (baseMa as number)) / (baseMa as number)) * 100;
-    if (distanceToMa > 3) return { isValid: false, tier: null, status: '' };
+    if (distanceToMa > 3) return { isValid: false, tier: null, status: '', distance: distanceToMa };
 
     // 3. Volume Check (Current > Avg 20)
     const volInfo = checkVolumeSpike(volumes, 20);
@@ -138,26 +138,30 @@ export function checkDiatasAwanTiered(
 
     // 4. MACD Confirmation for Tiers
     const len = macdLine.length;
-    if (len < 2) return { isValid: false, tier: null, status: '' };
+    if (len < 2) return { isValid: false, tier: null, status: '', distance: distanceToMa };
     
-    const latestMacd = macdLine[len - 1];
-    const latestSignal = signalLine[len - 1];
+    const macdVal = macdLine[len - 1];
+    const signalVal = signalLine[len - 1];
 
-    if (latestMacd === null || latestSignal === null) return { isValid: false, tier: null, status: '' };
+    if (macdVal === null || signalVal === null) return { isValid: false, tier: null, status: '', distance: distanceToMa };
 
-    // Emas: MACD Bullish (MACD > Signal) AND Volume Support
-    // Silver: Bearish MACD OR No Volume Support
-    if (latestMacd > latestSignal && hasVolumeSupport) {
+    // a. Golden Cross or Positive MACD Trend
+    // User: "Daily Golden Cross naik tidak death cross turun"
+    const isBullishMacd = macdVal > signalVal;
+
+    if (isBullishMacd) {
         return { 
             isValid: true, 
             tier: 'Emas', 
-            status: 'Beli Sekarang' 
+            status: 'Beli Sekarang',
+            distance: distanceToMa
         };
     } else {
         return { 
             isValid: true, 
             tier: 'Silver', 
-            status: 'Mulai Beli' 
+            status: 'Mulai Beli',
+            distance: distanceToMa
         };
     }
 }

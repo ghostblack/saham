@@ -18,7 +18,9 @@ interface StockCardProps {
 }
 
 export function StockCard({ stock, activeTab, isSaved, onSave, onAnalyze }: StockCardProps) {
-  const isGain = (stock.distance || 0) > 0 || (stock.gainFromCross !== undefined && stock.gainFromCross > 0)
+  const isGain = (stock.distance || 0) > 0 || 
+                 (stock.gainFromCross !== undefined && stock.gainFromCross > 0) ||
+                 (stock.distanceToMA20 !== undefined && stock.distanceToMA20 > 0)
   
   return (
     <Card className="group relative overflow-hidden border-border bg-white transition-all duration-300 hover:border-primary/50 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.06)] rounded-[1.5rem] border-[1.5px]">
@@ -45,8 +47,9 @@ export function StockCard({ stock, activeTab, isSaved, onSave, onAnalyze }: Stoc
               "text-[11px] font-black uppercase mt-1.5 tracking-tight",
               isGain ? "text-emerald-500" : "text-amber-500"
             )}>
-              {activeTab === 'screener_awan' ? `+${((stock.distance || 0) * 100).toFixed(2)}%` : 
-               activeTab === 'screener_bottom' ? `+${(stock.gainFromCross || 0).toFixed(2)}%` : ""}
+              {activeTab === 'screener_awan' ? `+${(stock.distance || 0).toFixed(2)}%` : 
+               activeTab === 'screener_bottom' ? `+${(stock.gainFromCross || 0).toFixed(2)}%` : 
+               activeTab === 'screener_turnaround' ? `+${(stock.distanceToMA20 || 0).toFixed(2)}%` : ""}
             </p>
           </div>
         </div>

@@ -81,6 +81,7 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                                 volumeRatio: volumeInfoAwan.ratio, isVolumeSpike: volumeInfoAwan.isSpike,
                                 tier: tieredResult.tier, // "Emas", "Silver"
                                 status: tieredResult.status, // "Beli Sekarang", "Mulai Beli"
+                                distance: tieredResult.distance,
                                 smaValues: latestSmasAwan,
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)

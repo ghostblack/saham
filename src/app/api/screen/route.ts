@@ -222,6 +222,7 @@ export async function POST(request: Request) {
                     validationData = {
                         tier: tieredResult.tier, // "Emas", "Silver"
                         status: tieredResult.status, // "Beli Sekarang", "Mulai Beli"
+                        distance: tieredResult.distance,
                         volumeRatio: volumeInfo.ratio,
                         isVolumeSpike: volumeInfo.isSpike,
                         smaValues: smas,

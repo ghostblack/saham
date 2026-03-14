@@ -198,9 +198,9 @@ export function ResultTable({
                         "font-black font-mono text-[11px] tabular-nums",
                         isGain ? "text-emerald-600" : "text-amber-600"
                       )}>
-                      {activeTab === 'screener_awan' ? `+${((stock.distance || 0) * 100).toFixed(1)}%` : 
+                      {activeTab === 'screener_awan' ? `+${(stock.distance || 0).toFixed(1)}%` : 
                        activeTab === 'screener_bottom' ? `+${(stock.gainFromCross || 0).toFixed(1)}%` : 
-                       activeTab === 'screener_turnaround' ? `+${(stock.gainFromCross || 0).toFixed(1)}%` : ""}
+                       activeTab === 'screener_turnaround' ? `+${(stock.distanceToMA20 || 0).toFixed(1)}%` : ""}
                     </span>
                   </TableCell>
                   <TableCell className="py-2 px-4 border-r border-border/40">
