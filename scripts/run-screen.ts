@@ -76,12 +76,16 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         const tieredResult = checkDiatasAwanTiered(currentPrice, dailyChangePercentAwan, volumes, latestSmasAwan, macdDataAwan.macdLine, macdDataAwan.signalLine);
                         
                         if (tieredResult.isValid) {
+                            const rsiDataAwan = calculateRSI(closes);
+                            const currentRsiAwan = rsiDataAwan[rsiDataAwan.length - 1];
+
                             resultsAwan.push({
                                 ticker, price: currentPrice, volume: currentVolume,
                                 volumeRatio: volumeInfoAwan.ratio, isVolumeSpike: volumeInfoAwan.isSpike,
                                 tier: tieredResult.tier, // "Emas", "Silver"
                                 status: tieredResult.status, // "Beli Sekarang", "Mulai Beli"
                                 distance: tieredResult.distance,
+                                rsi: currentRsiAwan,
                                 smaValues: latestSmasAwan,
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)

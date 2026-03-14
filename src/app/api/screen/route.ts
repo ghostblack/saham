@@ -218,11 +218,15 @@ export async function POST(request: Request) {
                 const tieredResult = checkDiatasAwanTiered(currentPrice, dailyChangePercent, volumes, smas, macdData.macdLine, macdData.signalLine);
                 
                 if (tieredResult.isValid) {
+                    const rsiData = calculateRSI(closes);
+                    const currentRsi = rsiData[rsiData.length - 1];
+                    
                     isValid = true;
                     validationData = {
                         tier: tieredResult.tier, // "Emas", "Silver"
                         status: tieredResult.status, // "Beli Sekarang", "Mulai Beli"
                         distance: tieredResult.distance,
+                        rsi: currentRsi,
                         volumeRatio: volumeInfo.ratio,
                         isVolumeSpike: volumeInfo.isSpike,
                         smaValues: smas,

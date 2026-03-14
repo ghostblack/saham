@@ -150,14 +150,8 @@ export function ResultTable({
               >
                 <div className="flex items-center justify-between px-2">Vol Ratio <SortIcon column="volumeRatio" /></div>
               </TableHead>
-              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">Signal</TableHead>
-              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">{activeTab === 'screener_awan' ? "Tier" : "Structure"}</TableHead>
-              {(activeTab === 'screener_bottom' || activeTab === 'screener_turnaround') && (
-                <>
-                  <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">RSI</TableHead>
-                  <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">Target</TableHead>
-                </>
-              )}
+              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">RSI</TableHead>
+              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">Target</TableHead>
               <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 text-right px-4">Ops</TableHead>
             </TableRow>
           </TableHeader>
@@ -213,80 +207,27 @@ export function ResultTable({
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="py-2 px-4 border-r border-border/40 min-w-[110px]">
-                    {(() => {
-                        let displayStatus = stock.status;
-                        if (displayStatus === 'Super Ketat') displayStatus = 'Rekom Beli';
-                        if (displayStatus === 'Ketat') displayStatus = 'Mulai Beli';
-                        
-                        if (!displayStatus) return "-";
-
-                        return (
-                            <div className={cn(
-                              "text-[9px] font-black px-1.5 py-1 border uppercase tracking-tighter text-center",
-                              displayStatus === 'Rekom Beli' ? "border-emerald-500 text-emerald-500 bg-emerald-500/5" :
-                              displayStatus === 'Mulai Beli' ? "border-primary text-primary bg-primary/5" :
-                              "border-border text-muted-foreground bg-muted/5"
-                            )}>
-                              {displayStatus}
-                            </div>
-                        );
-                    })()}
+                  <TableCell className="py-2 px-4 border-r border-border/40 text-center">
+                    <span className={cn(
+                      "text-[10px] font-black",
+                      (stock.rsi || 0) < 30 ? "text-emerald-500" : 
+                      (stock.rsi || 0) > 70 ? "text-rose-500" : "text-foreground"
+                    )}>
+                      {stock.rsi ? Math.round(stock.rsi) : "-"}
+                    </span>
                   </TableCell>
-                   <TableCell className="py-2 px-4 border-r border-border/40 min-w-[200px]">
-                    <div className="flex flex-wrap items-center gap-2">
-                       {activeTab === 'screener_awan' && stock.tier && (
-                         <span className={cn(
-                           "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shrink-0",
-                           stock.tier === 'Emas' ? "bg-amber-100 text-amber-700 border border-amber-200" : 
-                           "bg-slate-100 text-slate-600 border border-slate-200"
-                         )}>
-                           {stock.tier}
-                         </span>
-                       )}
-                       {(() => {
-                         let tStatus = stock.tightStatus;
-                         // Fallback for old data
-                         if (!tStatus && stock.status === 'Super Ketat') tStatus = 'Super Rapat';
-                         if (!tStatus && stock.status === 'Ketat') tStatus = 'Rapat';
-                         
-                         if (!tStatus) return null;
-
-                         return (
-                           <span className={cn(
-                             "text-[8px] font-black uppercase tracking-widest",
-                             tStatus === 'Super Rapat' ? "text-primary" : "text-muted-foreground opacity-60"
-                           )}>
-                              {tStatus}
-                           </span>
-                         );
-                       })()}
-                       {isAboveMA200 && (
-                         <span className="text-[8px] font-black text-blue-600/60 uppercase tracking-tighter border-l border-border/20 pl-2">MA200 ↑</span>
-                       )}
-                    </div>
-                  </TableCell>
-                  {(activeTab === 'screener_bottom' || activeTab === 'screener_turnaround') && (
-                    <>
-                      <TableCell className="py-2 px-4 border-r border-border/40 text-center">
-                        <span className={cn(
-                          "text-[10px] font-black",
-                          (stock.rsi || 0) < 30 ? "text-emerald-500" : 
-                          (stock.rsi || 0) > 70 ? "text-rose-500" : "text-foreground"
-                        )}>
-                          {stock.rsi ? Math.round(stock.rsi) : "-"}
+                  <TableCell className="py-2 px-4 border-r border-border/40 text-center">
+                    {stock.maTarget ? (
+                      <div className="flex flex-col items-center">
+                        <span className="text-[8.5px] font-black text-emerald-500 whitespace-nowrap">
+                          TP: Rp {(stock.smaValues?.[stock.maTarget] || 0).toLocaleString('id-ID')}
                         </span>
-                      </TableCell>
-                      <TableCell className="py-2 px-4 border-r border-border/40 text-center">
-                        {stock.maTarget ? (
-                          <div className="flex flex-col items-center">
-                            <span className="text-[8px] font-bold text-muted-foreground uppercase leading-none mb-1">MA{stock.maTarget}</span>
-                            <span className="text-[10px] font-black text-emerald-500">+{stock.distanceToTarget?.toFixed(1)}%</span>
-                          </div>
-                        ) : "-"}
-                      </TableCell>
-                    </>
-                  )}
+                        <span className="text-[7.5px] font-bold text-muted-foreground uppercase leading-none mt-1">
+                          MA{stock.maTarget} (+{stock.distanceToTarget?.toFixed(1)}%)
+                        </span>
+                      </div>
+                    ) : "-"}
+                  </TableCell>
                   <TableCell className="text-right px-4 py-2">
                     <div className="flex items-center justify-end gap-2">
                       <button 
