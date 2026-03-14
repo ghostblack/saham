@@ -107,13 +107,34 @@ export async function POST(request: Request) {
                 );
                 isValid = result.isValid;
                 if (isValid) {
+                    const rsiData = calculateRSI(closes);
+                    const currentRsi = rsiData[rsiData.length - 1];
+                    
+                    const ma50 = smaData[50][smaData[50].length - 1];
+                    const ma100 = smaData[100][smaData[100].length - 1];
+                    
+                    let maTarget = null;
+                    let distanceToTarget = null;
+                    if (ma50 && currentPrice < ma50) {
+                        maTarget = 50;
+                        distanceToTarget = ((ma50 - currentPrice) / currentPrice) * 100;
+                    } else if (ma100 && currentPrice < ma100) {
+                        maTarget = 100;
+                        distanceToTarget = ((ma100 - currentPrice) / currentPrice) * 100;
+                    }
+
                     validationData = {
                         isVolumeSpike: true,
                         volumeRatio: result.volumeRatio,
                         gainFromCross: result.gainPercentage,
+                        rsi: currentRsi,
+                        maTarget,
+                        distanceToTarget,
                         smaValues: {
                             '10': smaData[10][smaData[10].length - 1] || 0,
-                            '20': smaData[20][smaData[20].length - 1] || 0
+                            '20': smaData[20][smaData[20].length - 1] || 0,
+                            '50': ma50 || 0,
+                            '100': ma100 || 0
                         },
                         ohlcData: (dailyData as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
@@ -129,7 +150,7 @@ export async function POST(request: Request) {
                 if (validWeekly.length < 20) return null;
 
                 const dailyMacd = calculateMACD(closes);
-                const dailySma = calculateMultipleSMAs(closes, [20]);
+                const dailySma = calculateMultipleSMAs(closes, [20, 50, 100]);
                 const weeklyCloses = validWeekly.map(d => d.close);
                 const weeklyMacd = calculateMACD(weeklyCloses);
 
@@ -141,12 +162,37 @@ export async function POST(request: Request) {
 
                 isValid = result.isValid;
                 if (isValid) {
+                    const rsiData = calculateRSI(closes);
+                    const currentRsi = rsiData[rsiData.length - 1];
+
+                    // Target is distance to the nearest significant MA (50 or 100) that is above current price
+                    const ma50 = (dailySma[50] as any[])?.[dailySma[50].length - 1];
+                    const ma100 = (dailySma[100] as any[])?.[dailySma[100].length - 1];
+                    
+                    let maTarget = null;
+                    let distanceToTarget = null;
+                    
+                    if (ma50 && currentPrice < ma50) {
+                        maTarget = 50;
+                        distanceToTarget = ((ma50 - currentPrice) / currentPrice) * 100;
+                    } else if (ma100 && currentPrice < ma100) {
+                        maTarget = 100;
+                        distanceToTarget = ((ma100 - currentPrice) / currentPrice) * 100;
+                    }
+
+                    const smas: Record<number, number | null> = {};
+                    [20, 50, 100].forEach(p => {
+                        const values = dailySma[p];
+                        smas[p] = values[values.length - 1];
+                    });
+
                     validationData = {
                         status: result.status,
                         distanceToMA20: result.distanceToMA20,
-                        smaValues: {
-                            '20': dailySma[20][dailySma[20].length - 1]
-                        },
+                        rsi: currentRsi,
+                        maTarget,
+                        distanceToTarget,
+                        smaValues: smas,
                         ohlcData: (dailyData as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
                             y: [d.open, d.high, d.low, d.close]

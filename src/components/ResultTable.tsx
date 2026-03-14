@@ -142,7 +142,7 @@ export function ResultTable({
                 className="h-10 text-[9px] font-black uppercase tracking-widest py-0 cursor-pointer hover:bg-muted/10 transition-colors border-r border-border/40"
                 onClick={() => handleSort('perf')}
               >
-                <div className="flex items-center justify-between px-2">Perf <SortIcon column="perf" /></div>
+                <div className="flex items-center justify-between px-2">{activeTab === 'screener_awan' ? "Jarak MA" : "Perf"} <SortIcon column="perf" /></div>
               </TableHead>
               <TableHead 
                 className="h-10 text-[9px] font-black uppercase tracking-widest py-0 cursor-pointer hover:bg-muted/10 transition-colors border-r border-border/40"
@@ -151,7 +151,13 @@ export function ResultTable({
                 <div className="flex items-center justify-between px-2">Vol Ratio <SortIcon column="volumeRatio" /></div>
               </TableHead>
               <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">Signal</TableHead>
-              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">Structure</TableHead>
+              <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40">{activeTab === 'screener_awan' ? "Tier" : "Structure"}</TableHead>
+              {(activeTab === 'screener_bottom' || activeTab === 'screener_turnaround') && (
+                <>
+                  <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">RSI</TableHead>
+                  <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 px-4 border-r border-border/40 text-center">Target</TableHead>
+                </>
+              )}
               <TableHead className="h-10 text-[9px] font-black uppercase tracking-widest py-0 text-right px-4">Ops</TableHead>
             </TableRow>
           </TableHeader>
@@ -227,8 +233,17 @@ export function ResultTable({
                         );
                     })()}
                   </TableCell>
-                  <TableCell className="py-2 px-4 border-r border-border/40 min-w-[110px]">
+                   <TableCell className="py-2 px-4 border-r border-border/40 min-w-[200px]">
                     <div className="flex flex-wrap items-center gap-2">
+                       {activeTab === 'screener_awan' && stock.tier && (
+                         <span className={cn(
+                           "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shrink-0",
+                           stock.tier === 'Emas' ? "bg-amber-100 text-amber-700 border border-amber-200" : 
+                           "bg-slate-100 text-slate-600 border border-slate-200"
+                         )}>
+                           {stock.tier}
+                         </span>
+                       )}
                        {(() => {
                          let tStatus = stock.tightStatus;
                          // Fallback for old data
@@ -251,6 +266,27 @@ export function ResultTable({
                        )}
                     </div>
                   </TableCell>
+                  {(activeTab === 'screener_bottom' || activeTab === 'screener_turnaround') && (
+                    <>
+                      <TableCell className="py-2 px-4 border-r border-border/40 text-center">
+                        <span className={cn(
+                          "text-[10px] font-black",
+                          (stock.rsi || 0) < 30 ? "text-emerald-500" : 
+                          (stock.rsi || 0) > 70 ? "text-rose-500" : "text-foreground"
+                        )}>
+                          {stock.rsi ? Math.round(stock.rsi) : "-"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-2 px-4 border-r border-border/40 text-center">
+                        {stock.maTarget ? (
+                          <div className="flex flex-col items-center">
+                            <span className="text-[8px] font-bold text-muted-foreground uppercase leading-none mb-1">MA{stock.maTarget}</span>
+                            <span className="text-[10px] font-black text-emerald-500">+{stock.distanceToTarget?.toFixed(1)}%</span>
+                          </div>
+                        ) : "-"}
+                      </TableCell>
+                    </>
+                  )}
                   <TableCell className="text-right px-4 py-2">
                     <div className="flex items-center justify-end gap-2">
                       <button 

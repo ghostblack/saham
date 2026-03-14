@@ -98,13 +98,33 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         );
                         
                         if (bResult.isValid) {
+                            const rsiDataM = calculateRSI(closes);
+                            const currentRsiM = rsiDataM[rsiDataM.length - 1];
+                            const ma50M = smaDataM[50][smaDataM[50].length - 1];
+                            const ma100M = smaDataM[100][smaDataM[100].length - 1];
+                            
+                            let maTargetM = null;
+                            let distanceToTargetM = null;
+                            if (ma50M && currentPrice < ma50M) {
+                                maTargetM = 50;
+                                distanceToTargetM = ((ma50M - currentPrice) / currentPrice) * 100;
+                            } else if (ma100M && currentPrice < ma100M) {
+                                maTargetM = 100;
+                                distanceToTargetM = ((ma100M - currentPrice) / currentPrice) * 100;
+                            }
+
                             resultsBottom.push({
                                 ticker, price: currentPrice, volume: currentVolume,
                                 volumeRatio: bResult.volumeRatio, isVolumeSpike: true,
                                 gainFromCross: bResult.gainPercentage,
+                                rsi: currentRsiM,
+                                maTarget: maTargetM,
+                                distanceToTarget: distanceToTargetM,
                                 smaValues: {
                                     '10': smaDataM[10][smaDataM[10].length - 1] || 0,
-                                    '20': smaDataM[20][smaDataM[20].length - 1] || 0
+                                    '20': smaDataM[20][smaDataM[20].length - 1] || 0,
+                                    '50': ma50M || 0,
+                                    '100': ma100M || 0
                                 },
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)
@@ -132,15 +152,39 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                     );
 
                     if (resultT.isValid) {
+                        const rsiDataT = calculateRSI(dCloses);
+                        const currentRsiT = rsiDataT[rsiDataT.length - 1];
+                        const dSmaExtra = calculateMultipleSMAs(dCloses, [50, 100]);
+                        const ma50T = dSmaExtra[50][dSmaExtra[50].length - 1];
+                        const ma100T = dSmaExtra[100][dSmaExtra[100].length - 1];
+                        const currentPriceT = dCloses[dCloses.length - 1];
+
+                        let maTargetT = null;
+                        let distanceToTargetT = null;
+                        if (ma50T && currentPriceT < ma50T) {
+                            maTargetT = 50;
+                            distanceToTargetT = ((ma50T - currentPriceT) / currentPriceT) * 100;
+                        } else if (ma100T && currentPriceT < ma100T) {
+                            maTargetT = 100;
+                            distanceToTargetT = ((ma100T - currentPriceT) / currentPriceT) * 100;
+                        }
+
                         resultsTurnaround.push({
-                            ticker, price: dCloses[dCloses.length - 1], volume: dVolumes[dVolumes.length - 1],
+                            ticker, price: currentPriceT, volume: dVolumes[dVolumes.length - 1],
                             status: resultT.status,
                             distanceToMA20: resultT.distanceToMA20,
-                            smaValues: { '20': dSma[20][dSma[20].length - 1] },
+                            rsi: currentRsiT,
+                            maTarget: maTargetT,
+                            distanceToTarget: distanceToTargetT,
+                            smaValues: { 
+                                '20': dSma[20][dSma[20].length - 1],
+                                '50': ma50T,
+                                '100': ma100T
+                            },
                             ohlcData: (dailyData as any[]).slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                             sparkline: dCloses.slice(-40)
                         });
-                        console.log(`[TURN] FOUND: ${ticker}`);
+                        console.log(`[TURNAROUND] FOUND: ${ticker}`);
                     }
                 }
             } catch (e: any) {
