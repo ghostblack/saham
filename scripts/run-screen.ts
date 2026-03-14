@@ -2,7 +2,7 @@ import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../src/lib/firebase';
 import { IDX_TICKERS } from '../src/lib/tickers';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkMembumi, isHammerPattern } from '../src/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkBottoming, isHammerPattern } from '../src/lib/screener';
 import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '../src/lib/indicators';
 import YahooFinance from 'yahoo-finance2';
 
@@ -100,23 +100,28 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                             }
                         }
 
-                        // Check Membumi
-                        const rsiDataM = calculateRSI(closes, 14);
-                        const smaDataM = calculateMultipleSMAs(closes, [200]);
-                        const membumiResult = checkMembumi(closes, opens, highs, lows, volumes, rsiDataM, smaDataM[200]);
-                        if (membumiResult.isValid) {
-                            const isHammer = isHammerPattern(currentPrice, currentOpen, highs[highs.length - 1], lows[lows.length - 1]);
+                        // Check Bottoming (Reversal)
+                        const smaDataM = calculateMultipleSMAs(closes, [5, 10, 20, 50, 100]);
+                        const macdDataM = calculateMACD(closes);
+                        const bResult = checkBottoming(
+                            closes, opens, highs, lows, volumes,
+                            smaDataM[5], smaDataM[10], smaDataM[20], smaDataM[50], smaDataM[100],
+                            macdDataM.macdLine, macdDataM.signalLine
+                        );
+                        
+                        if (bResult.isValid) {
                             resultsBottom.push({
                                 ticker, price: currentPrice, volume: currentVolume,
-                                volumeRatio: membumiResult.volumeRatio, isVolumeSpike: true,
-                                isHammer,
+                                volumeRatio: bResult.volumeRatio, isVolumeSpike: true,
+                                gainFromCross: bResult.gainPercentage,
                                 smaValues: {
-                                    '200': smaDataM[200][smaDataM[200].length - 1] || 0
+                                    '10': smaDataM[10][smaDataM[10].length - 1] || 0,
+                                    '20': smaDataM[20][smaDataM[20].length - 1] || 0
                                 },
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)
                             });
-                            console.log(`[MEMBUMI] FOUND: ${ticker}`);
+                            console.log(`[BOTTOMING] FOUND: ${ticker}`);
                         }
                     }
                 }

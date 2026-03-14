@@ -117,72 +117,101 @@ export function isHammerPattern(close: number, open: number, high: number, low: 
 }
 
 /**
- * FITUR MEMBUMI (Reversal Akumulasi)
+ * FITUR BOTTOMING (Reversal Trend)
  * Syarat:
- * 1. Ada minimal 1 hari penurunan (merah) di 1-2 hari terakhir.
- * 2. Pada hari penurunan tersebut, volume perdagangan harus signifikan/melonjak.
- * 3. Hari ini: volume harus KECIL (lebih rendah dari volume hari penurunan).
- * 4. Hari ini: ukuran body candle KECIL (buka & tutup hampir sama) ATAU berbentuk Hammer.
- * 5. Hari ini: RSI harus menunjukkan kondisi oversold/lemah (RSI < 40).
- * 6. Hari ini: Harga berada di area Support MA 200 (di atas atau maksimal -8% dari MA 200).
+ * 1. Downtrend Context: Harga < MA 5, 10, 20, 50, 100 selama minimal 1 bulan (20+ hari).
+ * 2. Accumulation: Ada kenaikan volume selama fase bottom.
+ * 3. Price Trigger: Ada candle hijau yang lebih tinggi dari candle merah sebelumnya + volume.
+ * 4. Golden Cross: MA 10 cross di atas MA 20 pertama kali setelah downtrend.
+ * 5. Survival: Bertahan di atas MA 20 selama 1-2 hari.
+ * 6. Gain Cap: Harga saat ini belum naik > 5% dari harga crossing.
  */
-export function checkMembumi(
+export function checkBottoming(
     closes: number[],
     opens: number[],
     highs: number[],
     lows: number[],
     volumes: number[],
-    rsi: (number | null)[],
-    sma200: (number | null)[]
-): { isValid: boolean; volumeRatio: number } {
-    if (closes.length < 200) return { isValid: false, volumeRatio: 0 };
+    sma5: (number | null)[],
+    sma10: (number | null)[],
+    sma20: (number | null)[],
+    sma50: (number | null)[],
+    sma100: (number | null)[],
+    macdLine: (number | null)[],
+    signalLine: (number | null)[]
+): { isValid: boolean; volumeRatio: number; gainPercentage?: number } {
+    if (closes.length < 130) return { isValid: false, volumeRatio: 0 };
 
-    const currentClose = closes[closes.length - 1];
-    const currentOpen = opens[opens.length - 1];
-    const currentHigh = highs[highs.length - 1];
-    const currentLow = lows[lows.length - 1];
-    const currentVolume = volumes[volumes.length - 1];
-    const currentRSI = rsi[rsi.length - 1];
-    const currentMA200 = sma200[sma200.length - 1];
+    const len = closes.length;
+    const latestClose = closes[len - 1];
 
-    // 0. New Filters: RSI & Support Check
-    if (currentRSI === null || currentRSI >= 40) return { isValid: false, volumeRatio: 0 };
-    if (currentMA200 !== null && currentClose < currentMA200 * 0.92) return { isValid: false, volumeRatio: 0 };
+    // 1. Find the most recent Golden Cross (MA10 > MA20) in the last 7 days
+    let crossIndex = -1;
+    for (let i = len - 1; i >= len - 7; i--) {
+        const c10 = sma10[i];
+        const p10 = sma10[i - 1];
+        const c20 = sma20[i];
+        const p20 = sma20[i - 1];
 
-    let dropIndex = -1;
-    let maxDropVolume = 0;
-
-    // 1 & 2. Cari hari penurunan dengan volume terbesar di 1-2 hari terakhir (index length-3 dan length-2)
-    for (let i = closes.length - 3; i <= closes.length - 2; i++) {
-        const isRed = closes[i] < opens[i] || (i > 0 && closes[i] < closes[i-1]);
-        if (isRed && volumes[i] > maxDropVolume) {
-            dropIndex = i;
-            maxDropVolume = volumes[i];
+        if (c10 !== null && p10 !== null && c20 !== null && p20 !== null) {
+            if (c10 > c20 && p10 <= p20) {
+                crossIndex = i;
+                break;
+            }
         }
     }
 
-    if (dropIndex === -1) return { isValid: false, volumeRatio: 0 }; 
+    if (crossIndex === -1) return { isValid: false, volumeRatio: 0 };
 
-    // Cek seberapa signifikan volume hari penurunan itu dibanding rata-rata 5 hari sebelumnya
-    const prev5Vol = volumes.slice(dropIndex - 5, dropIndex);
-    if (prev5Vol.length === 0) return { isValid: false, volumeRatio: 0 };
-    const avgPrev5Vol = prev5Vol.reduce((a, b) => a + b, 0) / prev5Vol.length;
-    const volumeRatio = avgPrev5Vol > 0 ? maxDropVolume / avgPrev5Vol : 0;
+    // 2. MACD Confirmation: Bullish cross within the last 10 days
+    let macdBullish = false;
+    for (let i = len - 1; i >= len - 10; i--) {
+        if (macdLine[i] !== null && signalLine[i] !== null && 
+            macdLine[i-1] !== null && signalLine[i-1] !== null) {
+            if (macdLine[i]! > signalLine[i]!) {
+                macdBullish = true;
+                break;
+            }
+        }
+    }
+    if (!macdBullish) return { isValid: false, volumeRatio: 0 };
 
-    // Volume drop minimal harus lebih tinggi dari average (threshold 1.2x as discussed)
-    if (volumeRatio < 1.2) return { isValid: false, volumeRatio: 0 };
+    // 2. Downtrend History Check: Before the cross, was it below all MAs for at least 20 days?
+    // We check a window before the cross
+    let belowAllCount = 0;
+    const lookbackStart = Math.max(0, crossIndex - 60);
+    const lookbackEnd = crossIndex;
+    
+    for (let i = lookbackStart; i < lookbackEnd; i++) {
+        const c = closes[i];
+        const m5 = sma5[i], m10 = sma10[i], m20 = sma20[i], m50 = sma50[i], m100 = sma100[i];
+        if (m5 && m10 && m20 && m50 && m100) {
+            if (c < m5 && c < m10 && c < m20 && c < m50 && c < m100) {
+                belowAllCount++;
+            }
+        }
+    }
 
-    // 3. Hari ini volume harus kecil (kurang dari volume saat drop kemarin)
-    if (currentVolume >= maxDropVolume) return { isValid: false, volumeRatio };
+    // Must have been in downtrend for at least 20 days in the 60-day window before cross
+    if (belowAllCount < 20) return { isValid: false, volumeRatio: 0 };
 
-    // 4. Hari ini candle kecil ATAU hammer
-    const isHammer = isHammerPattern(currentClose, currentOpen, currentHigh, currentLow);
-    const bodySizePercent = Math.abs(currentClose - currentOpen) / currentOpen;
-    const isSmallBody = bodySizePercent <= 0.015; // Body maksimal 1.5%
+    // 3. Survival & Persistence: Price must stay above MA20 since cross
+    for (let i = crossIndex; i < len; i++) {
+        const c = closes[i];
+        const m20 = sma20[i];
+        if (m20 === null || c < m20) return { isValid: false, volumeRatio: 0 };
+    }
 
-    if (!isHammer && !isSmallBody) return { isValid: false, volumeRatio };
+    // 4. Gain Cap: Not more than 5% from cross price
+    const crossPrice = closes[crossIndex];
+    const gainPercentage = ((latestClose - crossPrice) / crossPrice) * 100;
+    if (gainPercentage > 5) return { isValid: false, volumeRatio: 0 };
 
-    return { isValid: true, volumeRatio };
+    // 5. Volume Confirmation: Ratio of volume during cross/reversal vs previous bottom
+    const avgPrevVol = volumes.slice(crossIndex - 20, crossIndex).reduce((a, b) => a + b, 0) / 20;
+    const volumeRatio = volumes[crossIndex] / avgPrevVol;
+
+    return { isValid: true, volumeRatio, gainPercentage };
 }
 
 /**
