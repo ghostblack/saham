@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkCariBottom } from '@/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkMembumi, isHammerPattern } from '@/lib/screener';
 import { calculateMultipleSMAs, calculateMACD } from '@/lib/indicators';
 import { IDX_TICKERS } from '@/lib/tickers';
 import { db } from '@/lib/firebase';
@@ -89,40 +89,16 @@ export async function POST(request: Request) {
             let isValid = false;
             let validationData: any = {};
 
-            if (strategy === 'cari_bottom') {
-                const smaData = calculateMultipleSMAs(closes, [10, 20, 50, 100, 200]);
-                const macdData = calculateMACD(closes);
-                const volumeInfo = checkVolumeSpike(volumes);
-                const result = checkCariBottom(
-                    closes,
-                    opens,
-                    lows,
-                    smaData[10],
-                    smaData[20],
-                    smaData[50],
-                    smaData[100],
-                    macdData.macdLine,
-                    macdData.signalLine
-                );
-                
+            if (strategy === 'membumi' || strategy === 'cari_bottom') {
+                const result = checkMembumi(closes, opens, highs, lows, volumes);
                 isValid = result.isValid;
                 if (isValid) {
+                    const isHammer = isHammerPattern(currentPrice, currentOpen, highs[highs.length - 1], lows[lows.length - 1]);
                     validationData = {
-                        volumeRatio: volumeInfo.ratio,
-                        isVolumeSpike: volumeInfo.isSpike,
-                        gainFromCross: result.gainPercentage,
-                        smaValues: {
-                            '10': smaData[10][smaData[10].length - 1] || 0,
-                            '20': smaData[20][smaData[20].length - 1] || 0,
-                            '200': smaData[200][smaData[200].length - 1] || 0
-                        },
-                        smaFullData: {
-                            10: smaData[10].slice(-40),
-                            20: smaData[20].slice(-40),
-                            50: smaData[50].slice(-40),
-                            100: smaData[100].slice(-40),
-                            200: smaData[200].slice(-40)
-                        },
+                        isVolumeSpike: true,
+                        volumeRatio: result.volumeRatio,
+                        smaValues: {},
+                        isHammer,
                         ohlcData: (data as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),
                             y: [d.open, d.high, d.low, d.close]

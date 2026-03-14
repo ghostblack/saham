@@ -2,7 +2,7 @@ import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../src/lib/firebase';
 import { IDX_TICKERS } from '../src/lib/tickers';
-import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkCariBottom, checkBottomBreakSideways } from '../src/lib/screener';
+import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkMembumi, isHammerPattern } from '../src/lib/screener';
 import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '../src/lib/indicators';
 import YahooFinance from 'yahoo-finance2';
 
@@ -100,45 +100,19 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                             }
                         }
 
-                        // Check Cari Bottom
-                        const smaDataBottom = calculateMultipleSMAs(closes, [5, 10, 20, 50, 100, 200]);
-                        const macdDataBottom = calculateMACD(closes);
-                        const rsiDataBottom = calculateRSI(closes, 14);
-                        const volumeInfoBottom = checkVolumeSpike(volumes);
-                        const bottomResult = checkCariBottom(
-                            closes, opens, lows, volumes, rsiDataBottom,
-                            smaDataBottom[5], smaDataBottom[10], smaDataBottom[20], smaDataBottom[50], smaDataBottom[100],
-                            macdDataBottom.macdLine, macdDataBottom.signalLine
-                        );
-                        if (bottomResult.isValid) {
+                        // Check Membumi
+                        const membumiResult = checkMembumi(closes, opens, highs, lows, volumes);
+                        if (membumiResult.isValid) {
+                            const isHammer = isHammerPattern(currentPrice, currentOpen, highs[highs.length - 1], lows[lows.length - 1]);
                             resultsBottom.push({
                                 ticker, price: currentPrice, volume: currentVolume,
-                                volumeRatio: volumeInfoBottom.ratio, isVolumeSpike: volumeInfoBottom.isSpike,
-                                gainFromCross: bottomResult.gainPercentage,
-                                smaValues: { '10': smaDataBottom[10][smaDataBottom[10].length - 1], '20': smaDataBottom[20][smaDataBottom[20].length - 1] },
-                                smaFullData: { 10: smaDataBottom[10].slice(-40), 20: smaDataBottom[20].slice(-40), 50: smaDataBottom[50].slice(-40), 100: smaDataBottom[100].slice(-40) },
+                                volumeRatio: membumiResult.volumeRatio, isVolumeSpike: true,
+                                isHammer,
+                                smaValues: {},
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)
                             });
-                            console.log(`[BOTTOM] FOUND: ${ticker}`);
-                        }
-
-                        // Check Bottom Break Sideways
-                        const sidewaysResult = checkBottomBreakSideways(
-                            closes, lows, highs, volumes, smaDataBottom[20]
-                        );
-                        if (sidewaysResult.isValid) {
-                            resultsBottom.push({
-                                ticker, price: currentPrice, volume: currentVolume,
-                                volumeRatio: volumeInfoBottom.ratio, isVolumeSpike: volumeInfoBottom.isSpike,
-                                gainFromBreak: sidewaysResult.gainPercentage,
-                                isSidewaysBreak: true,
-                                smaValues: { '20': smaDataBottom[20][smaDataBottom[20].length - 1] },
-                                smaFullData: { 10: smaDataBottom[10].slice(-40), 20: smaDataBottom[20].slice(-40), 50: smaDataBottom[50].slice(-40), 100: smaDataBottom[100].slice(-40) },
-                                ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
-                                sparkline: closes.slice(-40)
-                            });
-                            console.log(`[SIDEWAYS] FOUND: ${ticker}`);
+                            console.log(`[MEMBUMI] FOUND: ${ticker}`);
                         }
                     }
                 }
@@ -220,7 +194,7 @@ async function main() {
         
         await Promise.all([
             setDoc(doc(db, 'system', 'screening_results_diatas_awan'), { results: allResults.diatas_awan, timestamp }),
-            setDoc(doc(db, 'system', 'screening_results_cari_bottom'), { results: allResults.cari_bottom, timestamp }),
+            setDoc(doc(db, 'system', 'screening_results_membumi'), { results: allResults.cari_bottom, timestamp }),
             setDoc(doc(db, 'system', 'screening_results_turnaround'), { results: allResults.turnaround, timestamp })
         ]);
 

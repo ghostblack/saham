@@ -102,6 +102,81 @@ export function validateSmaCriteria(
 }
 
 /**
+ * Helper: Detects Hammer candlestick pattern.
+ */
+export function isHammerPattern(close: number, open: number, high: number, low: number) {
+    const bodySize = Math.abs(close - open);
+    const lowerWick = Math.min(close, open) - low;
+    const upperWick = high - Math.max(close, open);
+    const totalSize = high - low;
+
+    if (totalSize === 0) return false;
+
+    // Standard Hammer: Lower wick at least 2x body, very small upper wick
+    return lowerWick >= 2 * bodySize && upperWick <= bodySize * 0.5;
+}
+
+/**
+ * FITUR MEMBUMI (Reversal Akumulasi)
+ * Syarat:
+ * 1. Ada minimal 1 hari penurunan (merah) di 1-2 hari terakhir.
+ * 2. Pada hari penurunan tersebut, volume perdagangan harus signifikan/melonjak.
+ * 3. Hari ini: volume harus KECIL (lebih rendah dari volume hari penurunan).
+ * 4. Hari ini: ukuran body candle KECIL (buka & tutup hampir sama) ATAU berbentuk Hammer.
+ */
+export function checkMembumi(
+    closes: number[],
+    opens: number[],
+    highs: number[],
+    lows: number[],
+    volumes: number[]
+): { isValid: boolean; volumeRatio: number } {
+    if (closes.length < 15) return { isValid: false, volumeRatio: 0 };
+
+    const currentClose = closes[closes.length - 1];
+    const currentOpen = opens[opens.length - 1];
+    const currentHigh = highs[highs.length - 1];
+    const currentLow = lows[lows.length - 1];
+    const currentVolume = volumes[volumes.length - 1];
+
+    let dropIndex = -1;
+    let maxDropVolume = 0;
+
+    // 1 & 2. Cari hari penurunan dengan volume terbesar di 1-2 hari terakhir (index length-3 dan length-2)
+    // i = length - 3 (lusa), length - 2 (kemarin)
+    for (let i = closes.length - 3; i <= closes.length - 2; i++) {
+        const isRed = closes[i] < opens[i] || (i > 0 && closes[i] < closes[i-1]);
+        if (isRed && volumes[i] > maxDropVolume) {
+            dropIndex = i;
+            maxDropVolume = volumes[i];
+        }
+    }
+
+    if (dropIndex === -1) return { isValid: false, volumeRatio: 0 }; 
+
+    // Cek seberapa signifikan volume hari penurunan itu dibanding rata-rata 5 hari sebelumnya
+    const prev5Vol = volumes.slice(dropIndex - 5, dropIndex);
+    if (prev5Vol.length === 0) return { isValid: false, volumeRatio: 0 };
+    const avgPrev5Vol = prev5Vol.reduce((a, b) => a + b, 0) / prev5Vol.length;
+    const volumeRatio = avgPrev5Vol > 0 ? maxDropVolume / avgPrev5Vol : 0;
+
+    // Volume drop minimal harus lebih tinggi dari average (threshold 1.2x as discussed)
+    if (volumeRatio < 1.2) return { isValid: false, volumeRatio: 0 };
+
+    // 3. Hari ini volume harus kecil (kurang dari volume saat drop kemarin)
+    if (currentVolume >= maxDropVolume) return { isValid: false, volumeRatio };
+
+    // 4. Hari ini candle kecil ATAU hammer
+    const isHammer = isHammerPattern(currentClose, currentOpen, currentHigh, currentLow);
+    const bodySizePercent = Math.abs(currentClose - currentOpen) / currentOpen;
+    const isSmallBody = bodySizePercent <= 0.015; // Body maksimal 1.5%
+
+    if (!isHammer && !isSmallBody) return { isValid: false, volumeRatio };
+
+    return { isValid: true, volumeRatio };
+}
+
+/**
  * Checks for a volume spike compared to average.
  */
 export function checkVolumeSpike(volumes: number[], period: number = 20) {
@@ -118,187 +193,6 @@ export function checkVolumeSpike(volumes: number[], period: number = 20) {
         isRocket: currentVolume > avgVolume,
         ratio
     };
-}
-
-/**
- * FITUR 2: CARI BOTTOM (Bottoming & MA 20 Bounce)
- * Syarat:
- * 1. Harga sebelumnya berada di bawah semua MA (10, 20, 50, 100) dalam 40 hari terakhir (fase downtrend).
- * 2. MA 10 (Orange) sudah memotong MA 20 (Hijau) ke atas dalam 20 hari terakhir.
- * 3. Harga saat ini sedang "mantul" (bounce) atau retest di MA 20.
- * 4. Harga CLOSE saat ini berada di atas MA 20, tapi jaraknya tidak lebih dari 3% dari MA 20.
- */
-export function checkCariBottom(
-    closes: number[],
-    opens: number[],
-    lows: number[],
-    volumes: number[],
-    rsi: (number | null)[],
-    sma5: (number | null)[],
-    sma10: (number | null)[],
-    sma20: (number | null)[],
-    sma50: (number | null)[],
-    sma100: (number | null)[],
-    macdLine: (number | null)[],
-    signalLine: (number | null)[]
-): { isValid: boolean; gainPercentage?: number } {
-    if (closes.length < 60 || sma100.length < 60 || volumes.length < 60 || rsi.length < 60 || sma5.length < 60) return { isValid: false };
-
-    const len = closes.length;
-    const latestClose = closes[len - 1];
-    const latestMA20 = sma20[len - 1];
-    const latestMA10 = sma10[len - 1];
-
-    if (latestMA20 === null || latestMA10 === null) return { isValid: false };
-
-    // 0. RSI OVERSOLD CHECK: Was RSI < 30 in the last 15 days?
-    const rsiWindow = rsi.slice(-15);
-    const wasOversold = rsiWindow.some(val => val !== null && val < 30);
-    if (!wasOversold) return { isValid: false };
-
-    // 1. MUST have been in a "Real Downtrend" 20-10 days ago
-    // (Price < MA10, MA20, MA50, MA100)
-    let confirmedDowntrendHistory = false;
-    for (let i = len - 25; i < len - 10; i++) {
-        const c = closes[i];
-        const m5 = sma5[i];
-        const m10 = sma10[i];
-        const m20 = sma20[i];
-        const m50 = sma50[i];
-        
-        if (m5 !== null && m10 !== null && m20 !== null && m50 !== null) {
-            if (c < m5 && c < m10 && c < m20 && c < m50) {
-                confirmedDowntrendHistory = true;
-                break;
-            }
-        }
-    }
-    if (!confirmedDowntrendHistory) return { isValid: false };
-
-    // 2. Find the FIRST Golden Cross (MA10 > MA20) in the last 5 days
-    let crossIndex = -1;
-    for (let i = len - 5; i < len; i++) {
-        const curr10 = sma10[i];
-        const prev10 = sma10[i - 1];
-        const curr20 = sma20[i];
-        const prev20 = sma20[i - 1];
-
-        if (curr10 !== null && prev10 !== null && curr20 !== null && prev20 !== null) {
-            if (curr10 > curr20 && prev10 <= prev20) {
-                crossIndex = i;
-                break;
-            }
-        }
-    }
-    if (crossIndex === -1) return { isValid: false };
-
-    // 3. Survival & Persistence Check:
-    // Price must have survived 1 to 3 days above MA20 since the cross
-    const daysSinceCross = (len - 1) - crossIndex;
-    if (daysSinceCross < 1 || daysSinceCross > 3) return { isValid: false };
-
-    // All days since cross must remain above MA20
-    for (let i = crossIndex; i < len; i++) {
-        const c = closes[i];
-        const m20 = sma20[i];
-        if (m20 === null || c < m20) return { isValid: false };
-    }
-
-    // 4. No New Low: Low after cross must be >= Low on cross day
-    const crossLow = lows[crossIndex];
-    for (let i = crossIndex + 1; i < len; i++) {
-        if (lows[i] < crossLow) return { isValid: false };
-    }
-
-    // 5. Volume Confirmation: "tiba tiba ada volume lebih besar"
-    // Ratio > 1.5x average on cross day OR current day
-    const calculateAvgVolume = (index: number) => {
-        const period = 20;
-        const prevVols = volumes.slice(Math.max(0, index - period), index);
-        if (prevVols.length === 0) return 0;
-        return prevVols.reduce((a, b) => a + b, 0) / prevVols.length;
-    };
-
-    const crossAvg = calculateAvgVolume(crossIndex);
-    const currAvg = calculateAvgVolume(len - 1);
-    const crossVolRatio = crossAvg > 0 ? volumes[crossIndex] / crossAvg : 1;
-    const currVolRatio = currAvg > 0 ? volumes[len - 1] / currAvg : 1;
-
-    if (crossVolRatio < 1.5 && currVolRatio < 1.5) return { isValid: false };
-
-    // 6. GAIN CAP: Gain from cross price must not exceed 5%
-    const crossPrice = closes[crossIndex];
-    const gainFromCross = ((latestClose - crossPrice) / crossPrice) * 100;
-    if (gainFromCross > 5) return { isValid: false };
-
-    return { isValid: true, gainPercentage: gainFromCross };
-}
-
-/**
- * Bottom Break Sideways:
- * 1. Sideways for 30+ days (price range < 12%)
- * 2. Breakout above the sideways range & MA20 in the last 1-3 days
- * 3. Volume spike (>1.8x average) on breakout
- */
-export function checkBottomBreakSideways(
-    closes: number[],
-    lows: number[],
-    highs: number[],
-    volumes: number[],
-    sma20: (number | null)[]
-): { isValid: boolean; gainPercentage?: number } {
-    if (closes.length < 40 || sma20.length < 40) return { isValid: false };
-
-    const len = closes.length;
-    const latestClose = closes[len - 1];
-    
-    // 1. Sideways Check (33 to 3 days ago, ~30 days)
-    const windowStart = len - 33;
-    const windowEnd = len - 3;
-    if (windowStart < 0) return { isValid: false };
-
-    const windowHighs = highs.slice(windowStart, windowEnd);
-    const windowLows = lows.slice(windowStart, windowEnd);
-    
-    const maxH = Math.max(...windowHighs);
-    const minL = Math.min(...windowLows);
-    const priceRange = (maxH - minL) / minL;
-
-    // Must be sideways (range <= 12%)
-    if (priceRange > 0.12) return { isValid: false };
-
-    // 2. Breakout Check (last 1-3 days)
-    let breakoutFound = false;
-    for (let i = len - 3; i < len; i++) {
-        const valMA20 = sma20[i];
-        if (closes[i] > maxH && valMA20 !== null && closes[i] > valMA20) {
-            breakoutFound = true;
-            break;
-        }
-    }
-    if (!breakoutFound) return { isValid: false };
-
-    // 3. Volume Confirmation
-    const calculateAvgVolume = (index: number) => {
-        const period = 20;
-        const prevVols = volumes.slice(Math.max(0, index - period), index);
-        return prevVols.length > 0 ? prevVols.reduce((a, b) => a + b, 0) / prevVols.length : 0;
-    };
-
-    let volumeConfirmed = false;
-    for (let i = len - 3; i < len; i++) {
-        const avg = calculateAvgVolume(i);
-        if (avg > 0 && volumes[i] / avg >= 1.8) {
-            volumeConfirmed = true;
-            break;
-        }
-    }
-    if (!volumeConfirmed) return { isValid: false };
-
-    const gainFromBreak = ((latestClose - maxH) / maxH) * 100;
-    if (gainFromBreak > 10) return { isValid: false };
-
-    return { isValid: true, gainPercentage: gainFromBreak };
 }
 
 /**
