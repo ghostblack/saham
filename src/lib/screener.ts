@@ -123,27 +123,36 @@ export function isHammerPattern(close: number, open: number, high: number, low: 
  * 2. Pada hari penurunan tersebut, volume perdagangan harus signifikan/melonjak.
  * 3. Hari ini: volume harus KECIL (lebih rendah dari volume hari penurunan).
  * 4. Hari ini: ukuran body candle KECIL (buka & tutup hampir sama) ATAU berbentuk Hammer.
+ * 5. Hari ini: RSI harus menunjukkan kondisi oversold/lemah (RSI < 40).
+ * 6. Hari ini: Harga berada di area Support MA 200 (di atas atau maksimal -8% dari MA 200).
  */
 export function checkMembumi(
     closes: number[],
     opens: number[],
     highs: number[],
     lows: number[],
-    volumes: number[]
+    volumes: number[],
+    rsi: (number | null)[],
+    sma200: (number | null)[]
 ): { isValid: boolean; volumeRatio: number } {
-    if (closes.length < 15) return { isValid: false, volumeRatio: 0 };
+    if (closes.length < 200) return { isValid: false, volumeRatio: 0 };
 
     const currentClose = closes[closes.length - 1];
     const currentOpen = opens[opens.length - 1];
     const currentHigh = highs[highs.length - 1];
     const currentLow = lows[lows.length - 1];
     const currentVolume = volumes[volumes.length - 1];
+    const currentRSI = rsi[rsi.length - 1];
+    const currentMA200 = sma200[sma200.length - 1];
+
+    // 0. New Filters: RSI & Support Check
+    if (currentRSI === null || currentRSI >= 40) return { isValid: false, volumeRatio: 0 };
+    if (currentMA200 !== null && currentClose < currentMA200 * 0.92) return { isValid: false, volumeRatio: 0 };
 
     let dropIndex = -1;
     let maxDropVolume = 0;
 
     // 1 & 2. Cari hari penurunan dengan volume terbesar di 1-2 hari terakhir (index length-3 dan length-2)
-    // i = length - 3 (lusa), length - 2 (kemarin)
     for (let i = closes.length - 3; i <= closes.length - 2; i++) {
         const isRed = closes[i] < opens[i] || (i > 0 && closes[i] < closes[i-1]);
         if (isRed && volumes[i] > maxDropVolume) {

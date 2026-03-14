@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getHistoricalData, validateSmaCriteria, checkVolumeSpike, checkTurnaround, checkMembumi, isHammerPattern } from '@/lib/screener';
-import { calculateMultipleSMAs, calculateMACD } from '@/lib/indicators';
+import { calculateMultipleSMAs, calculateMACD, calculateRSI } from '@/lib/indicators';
 import { IDX_TICKERS } from '@/lib/tickers';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -90,14 +90,18 @@ export async function POST(request: Request) {
             let validationData: any = {};
 
             if (strategy === 'membumi' || strategy === 'cari_bottom') {
-                const result = checkMembumi(closes, opens, highs, lows, volumes);
+                const rsiData = calculateRSI(closes, 14);
+                const smaData = calculateMultipleSMAs(closes, [200]);
+                const result = checkMembumi(closes, opens, highs, lows, volumes, rsiData, smaData[200]);
                 isValid = result.isValid;
                 if (isValid) {
                     const isHammer = isHammerPattern(currentPrice, currentOpen, highs[highs.length - 1], lows[lows.length - 1]);
                     validationData = {
                         isVolumeSpike: true,
                         volumeRatio: result.volumeRatio,
-                        smaValues: {},
+                        smaValues: {
+                            '200': smaData[200][smaData[200].length - 1] || 0
+                        },
                         isHammer,
                         ohlcData: (data as any[]).slice(-40).map(d => ({
                             x: new Date(d.date).getTime(),

@@ -101,14 +101,18 @@ async function processAllTickers(tickers: typeof IDX_TICKERS) {
                         }
 
                         // Check Membumi
-                        const membumiResult = checkMembumi(closes, opens, highs, lows, volumes);
+                        const rsiDataM = calculateRSI(closes, 14);
+                        const smaDataM = calculateMultipleSMAs(closes, [200]);
+                        const membumiResult = checkMembumi(closes, opens, highs, lows, volumes, rsiDataM, smaDataM[200]);
                         if (membumiResult.isValid) {
                             const isHammer = isHammerPattern(currentPrice, currentOpen, highs[highs.length - 1], lows[lows.length - 1]);
                             resultsBottom.push({
                                 ticker, price: currentPrice, volume: currentVolume,
                                 volumeRatio: membumiResult.volumeRatio, isVolumeSpike: true,
                                 isHammer,
-                                smaValues: {},
+                                smaValues: {
+                                    '200': smaDataM[200][smaDataM[200].length - 1] || 0
+                                },
                                 ohlcData: validDaily.slice(-40).map(d => ({ x: new Date(d.date).getTime(), y: [d.open, d.high, d.low, d.close] })),
                                 sparkline: closes.slice(-40)
                             });
